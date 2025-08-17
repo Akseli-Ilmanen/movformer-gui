@@ -1,0 +1,1686 @@
+classdef StrippedApp < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure                    matlab.ui.Figure
+        TabGroup                    matlab.ui.container.TabGroup
+        ClusteringTab               matlab.ui.container.Tab
+        GridLayout                  matlab.ui.container.GridLayout
+        SelectSessionPanel          matlab.ui.container.Panel
+        SessionPathEditField        matlab.ui.control.EditField
+        PathEditFieldLabel          matlab.ui.control.Label
+        Folder                      matlab.ui.control.Image
+        ImportButton                matlab.ui.control.Button
+        TrialInspectorTab           matlab.ui.container.Tab
+        GridLayout7                 matlab.ui.container.GridLayout
+        Panel_2                     matlab.ui.container.Panel
+        SpeedYLims                  matlab.ui.control.DropDown
+        DeleteMotifDataDropDown     matlab.ui.control.DropDown
+        DataSavedLabel              matlab.ui.control.Label
+        DeletedataforButton         matlab.ui.control.Button
+        SelectTrialDropDown         matlab.ui.control.DropDown
+        SaveAllMotifdataButton      matlab.ui.control.Button
+        DataNextButton              matlab.ui.control.Button
+        DataPrevButton              matlab.ui.control.Button
+        CreateMotifsPanel           matlab.ui.container.Panel
+        Button2                     matlab.ui.control.Button
+        PlotPredictionsCheckBox     matlab.ui.control.CheckBox
+        FindturningpointsLabel      matlab.ui.control.Label
+        FindminimaLabel             matlab.ui.control.Label
+        GradientthresholdSpinner    matlab.ui.control.Spinner
+        RelheightprominenceLabel_2  matlab.ui.control.Label
+        PlotchangepointsButton      matlab.ui.control.Button
+        PeakprominenceSpinner       matlab.ui.control.Spinner
+        RelheightprominenceLabel    matlab.ui.control.Label
+        TroughprominenceSpinner     matlab.ui.control.Spinner
+        TroughprominenceLabel       matlab.ui.control.Label
+        CreateMotifErrorLabel       matlab.ui.control.Label
+        TopViewPanel                matlab.ui.container.Panel
+        GridLayout8                 matlab.ui.container.GridLayout
+        GridLayout9                 matlab.ui.container.GridLayout
+        LabelAdjustMotifsPanel      matlab.ui.container.Panel
+        EditEButton                 matlab.ui.control.Button
+        ApplyAButton                matlab.ui.control.Button
+        LabelmodeCheckbox           matlab.ui.control.CheckBox
+        MotifsTable                 matlab.ui.control.Table
+        CircleconstraintLabel       matlab.ui.control.Label
+        EndCheckBox                 matlab.ui.control.CheckBox
+        StartCheckBox               matlab.ui.control.CheckBox
+        MotifEndSpinner             matlab.ui.control.Spinner
+        EndSpinnerLabel_2           matlab.ui.control.Label
+        MotifStartSpinner           matlab.ui.control.Spinner
+        StartSpinnerLabel_2         matlab.ui.control.Label
+        DeleteDButton               matlab.ui.control.Button
+        TrialMenubar                matlab.ui.container.Panel
+        BodypartLabel               matlab.ui.control.Label
+        BodypartDropDown            matlab.ui.control.DropDown
+        AxisResetButton             matlab.ui.control.Button
+        VelSpeedPanel               matlab.ui.container.Panel
+        GridLayout10                matlab.ui.container.GridLayout
+        DataAxis_speedPredict       matlab.ui.control.UIAxes
+        DataAxis_vel                matlab.ui.control.UIAxes
+        DataAxis_speed              matlab.ui.control.UIAxes
+        ContextMenu                 matlab.ui.container.ContextMenu
+        Menu                        matlab.ui.container.Menu
+        Menu2                       matlab.ui.container.Menu
+    end
+
+
+    properties (Access = private)
+
+       
+        % A row_idx gets status info.gui_excluded = true, if:
+        % - stick_in_box is not 1
+        % - stick_inserted is not 1
+        % - pellet num is not 1
+        % - boxT or dispT longer than 4 stds from median
+
+        
+        % Path stuff
+        User;
+        DefaultPath;
+        DataPath;
+        grandparentPath
+        ImgPath;
+        raw_videos_folder;
+        pipeline_folder; % store functions there can be used here
+        FilesSaved
+
+
+
+
+        AllTrialsData; % Different convention to struct being called AllTrials elsewhere in code, when saving do as below:
+        % AllTrials = app.AllTrialsData;
+        % save(fullfile(app.DataPath, "Trial_data.mat"), "AllTrials");
+        CurrentRowIdx;
+        CurrentTrial;
+        AngleColorMap;
+       
+
+        
+        YLimVelAxis = [-120, 120]; % Default Y-axis limits for DataAxis_vel
+        allowed_pellet_counts = [1] % if multiple pellets allowed, adjust here
+
+
+
+        % Velocity plots
+        SelectTrialDropDownActivated = false;
+
+
+        % topview panel settings
+        topview = "2D";
+        % {'stickTip','beakTip','box1','box2','box3','box4','box5','box6','box7','blende1','blende2','desk1','desk2'};
+        
+        % app.bp_plot_selector(app.col_position) determines
+        % - coloured trajectory in TopView
+        % - velocity, speed profile in TrialInspector, Ref Trial
+        % - in MotifViewer/WarpingViewer, there is a filter to only show
+        %  matches for templates with this bodypart
+        bp_plot_selector = {'beakTip', 'stickTip'}; % DYN_BODYPARTS
+        col_position = 1; % (e.g. 1 for stickTip, 2 for beakTip), 
+        
+
+        % video player settings
+
+
+        % clusters settings
+        bodypart_for_clustering = 'stickTip' % Also hard coded in Felix B_clustering code 
+        cluster_output;
+        chosen_cluster;
+        filtered_trial_nums;
+        filtered_row_idxs; % AllTrials rows for chosen clu
+
+
+
+
+
+
+        % motif stuff (Trial Inspetor)
+        MotifNames; % Names in e.g. left_mapping.txt
+        MotifColors; % RGB values in e.g. left_mapping.txt
+        MotifID % MotifID (see numbers in left_mappingtxt)
+        MotifPos; % [start, stop] of last clicked motif
+        template_xregion1;
+        template_xregion2;
+        ReadyForClick;
+        firstClick; % Template selection
+        secondClick;
+        CloserTo; % when clicking on motif, did user click closer to start, stop
+
+
+        % ExportPlots
+        ExportScaleFactor = 3;
+
+
+
+        
+
+    end
+
+    methods (Access = private)
+
+
+        % ------ Utils ------
+
+
+
+        function UIFigureKeyPress(app, event)
+            switch event.Key
+                case 'rightarrow'
+                    % Call your "next" button callback
+                    app.func_DataNextButtonPushed();
+                case 'leftarrow'
+                    % Call your "previous" button callback
+                    app.func_DataPrevButtonPushed();
+            end
+
+
+
+
+            
+            
+            % The shortcuts below are only applied if tickbox yes
+            if app.LabelmodeCheckbox.Value
+                    
+
+                % Jump to next show
+                if strcmp(event.Key, 'space')
+ 
+                    items = app.ShowTrialDropDown.Items;
+                    currentValue = app.ShowTrialDropDown.Value;
+
+                    % Find current index
+                    currentIdx = find(strcmp(items, currentValue));
+                    newIdx = currentIdx + 1;
+                    if newIdx > length(items)
+                        app.func_DataNextButtonPushed();
+                        return
+                    end
+
+                    app.ShowTrialDropDown.Value = items{newIdx};
+
+                    dummyEvent = [];
+                    app.ShowTrialDropDownValueChanged(dummyEvent)
+                end
+
+
+                % Escape 
+                if strcmp(event.Key, 'escape')
+                    return;
+                end
+
+                % Label motif
+                validKeys2 = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'q', 'w', 'r', 't'};
+                numbers = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+                
+                if isempty(event.Modifier) && ismember(event.Key, validKeys2)
+                    if ismember(event.Key, numbers)
+                        num = str2double(event.Key);
+                    else
+                        num = event.Key;
+                    end
+
+                    app.ReadyForClick = false;
+                    app.labelMotif(num);
+                end
+
+
+                % Apply motif
+                if strcmp(event.Key, 'a')
+                    app.ApplyMotif();
+                end
+
+                % Edit motif (by clicking)
+                if strcmp(event.Key, 'e')
+                    
+                    try 
+                        % Reset last clicked motif
+                        app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.MotifPos(1):app.MotifPos(2)) = 0;
+                    catch
+                        return
+                    end
+
+                    % Relabel it
+                    app.ReadyForClick = false;
+                    app.labelMotif(app.MotifID);
+
+
+                end
+                
+                % Edit motif (by up/down arrows)
+                if strcmp(event.Key, 'uparrow')
+                    % Reset last clicked motif
+                    app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.MotifPos(1):app.MotifPos(2)) = 0;
+                    
+                    % Relabel it
+                    if strcmp(app.CloserTo, 'start')
+                        app.MotifStartSpinner.Value = app.MotifStartSpinner.Value + 1;
+                    elseif strcmp(app.CloserTo, 'end')
+                        app.MotifEndSpinner.Value = app.MotifEndSpinner.Value + 1;
+                    end
+                    app.MotifPos = [app.MotifStartSpinner.Value, app.MotifEndSpinner.Value];
+                    app.highlight_topview_plot(app.MotifStartSpinner.Value , app.MotifEndSpinner.Value)
+                    app.update_labelled_motifs_xregions("--", "exception");
+                end
+                    
+                if strcmp(event.Key, 'downarrow')
+                    % Reset last clicked motif
+                    app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.MotifPos(1):app.MotifPos(2)) = 0;
+                    
+                    % Relabel it
+                    if strcmp(app.CloserTo, 'start')
+                        app.MotifStartSpinner.Value = app.MotifStartSpinner.Value - 1;
+                    elseif strcmp(app.CloserTo, 'end')
+                        app.MotifEndSpinner.Value = app.MotifEndSpinner.Value - 1;
+                    end
+                    app.MotifPos = [app.MotifStartSpinner.Value, app.MotifEndSpinner.Value];
+                    app.highlight_topview_plot(app.MotifStartSpinner.Value , app.MotifEndSpinner.Value)
+                    app.update_labelled_motifs_xregions("--", "exception");
+                end
+
+                % Delete motif
+                if strcmp(event.Key, 'd')
+                    app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.MotifPos(1):app.MotifPos(2)) = 0;
+                    app.plot_motifs();
+                end
+
+                % Play video of motif
+                if strcmp(event.Key, 'v')
+                    app.play_video(app.MotifPos(1), app.MotifPos(2))
+                end
+
+            end
+
+
+        end
+
+
+
+
+        function syncAxes(app, sourceAxis, targetAxis) % just for x-axis
+            % Ensure the source is not already synchronized to prevent recursion
+            persistent isSyncing;
+            if isempty(isSyncing) || ~isSyncing
+                isSyncing = true;
+                % Synchronize limits
+                targetAxis.XLim = sourceAxis.XLim;
+
+                isSyncing = false;
+            end
+        end
+
+        function newTrial(app)
+            % Full trial view, when going to new trial
+            app.ShowTrialDropDown.Value = app.ShowTrialDropDown.Items{1};
+            app.SpeedYLims.Value = app.SpeedYLims.Items{1};
+            app.StartCheckBox.Value = 1;
+            app.EndCheckBox.Value = 1;
+        end
+
+
+        function load_AllTrials(app)
+            full_path = app.SessionPathEditField.Value;
+
+            session_data = load(full_path);
+            app.AllTrialsData = session_data.AllTrials;
+        end
+
+
+
+        function save_AllTrials(app)
+            AllTrials = app.AllTrialsData;
+            save(fullfile(app.DataPath, "Trial_data.mat"), "AllTrials");
+            app.FilesSaved = true;
+        end
+
+
+
+     
+
+    
+        % ------ TrialInspectorTab (Plotting)  ------
+        
+        % Update trial dropdown options, default to first possible trial
+        % allowed e.g. first trial part of clu 3
+        % also updates app.CurrentRowIdx to this trial
+
+        function update_SelectTrialDropDown(app)
+            try 
+                app.filtered_trial_nums = [app.AllTrialsData(app.filtered_row_idxs).trial_num];
+            catch
+                return
+            end
+
+            app.filtered_trial_nums = sort(app.filtered_trial_nums);
+            app.SelectTrialDropDown.Items = arrayfun(@(x) sprintf('Trial %d', x), app.filtered_trial_nums, 'UniformOutput', false);
+            app.CurrentTrial = app.filtered_trial_nums(1);
+            app.CurrentRowIdx = find([app.AllTrialsData.trial_num] == app.CurrentTrial, 1);
+        end
+
+
+        function show_trial(app)
+                
+            % Reset saving status
+            app.FilesSaved = false;
+
+            if(isempty(app.AllTrialsData) | isempty(app.CurrentRowIdx))
+                return;
+            end
+
+            if app.SelectTrialDropDownActivated
+                trial_string = app.SelectTrialDropDown.Value;
+                app.CurrentTrial = str2double(regexp(trial_string, '\d+', 'match'));
+                app.CurrentRowIdx = find([app.AllTrialsData.trial_num] == app.CurrentTrial, 1);
+                app.SelectTrialDropDownActivated = false;
+            else
+                % if Trial not defined manually via DropDown
+                app.CurrentTrial = app.AllTrialsData(app.CurrentRowIdx).trial_num;
+                app.SelectTrialDropDown.Value = sprintf('Trial %d', app.CurrentTrial); 
+            end
+
+            
+
+           
+           
+
+            % get data
+            v = app.AllTrialsData(app.CurrentRowIdx).(app.bp_plot_selector{app.col_position}).v_xyz;
+            speed = app.AllTrialsData(app.CurrentRowIdx).(app.bp_plot_selector{app.col_position}).speed;
+            angle_rgb = app.AllTrialsData(app.CurrentRowIdx).(app.bp_plot_selector{app.col_position}).angle_rgb;
+
+
+            % Clear previous plots
+            cla(app.DataAxis_vel, 'reset');
+            cla(app.DataAxis_speed, 'reset');
+            cla(app.DataAxis_speedPredict, 'reset');
+            app.DataSavedLabel.Text = "";
+  
+
+
+            % plot v_x, v_y, v_z
+            vx = plot(app.DataAxis_vel, 1:length(v(:,1)), v(:,1), "Color", "#0072BD", 'LineWidth', 1.5);
+            hold(app.DataAxis_vel, "on");
+            vy = plot(app.DataAxis_vel, 1:length(v(:,2)), v(:,2), "Color", "#A2142F", 'LineWidth', 1.5);
+            vz = plot(app.DataAxis_vel, 1:length(v(:,3)), v(:,3), "Color", "#32cd32", 'LineWidth', 1.5);
+            hold(app.DataAxis_vel, "off");
+
+
+
+            % plot speed & colour
+            for j=1:length(speed)-1 % -1 because movement angles only calculated with forward scheme
+                line(app.DataAxis_speed, [j j+1], [speed(j) speed(j+1)], 'Color', angle_rgb(j,:), 'LineWidth', 2);
+                hold(app.DataAxis_speed, "on");
+            end
+
+            if app.PlotPredictionsCheckBox.Value
+                % plot speed & colour
+                for j=1:length(speed)-1 % -1 because movement angles only calculated with forward scheme
+                    line(app.DataAxis_speedPredict, [j j+1], [speed(j) speed(j+1)], 'Color', angle_rgb(j,:), 'LineWidth', 2);
+                    hold(app.DataAxis_speedPredict, "on");
+                end
+            end
+
+            % % Polot speed minima (troughs) if they exist
+            currentData = app.AllTrialsData(app.CurrentRowIdx).(app.bp_plot_selector{app.col_position});
+            if isfield(currentData, 'troughs') && ~isempty(currentData.troughs)
+                troughs = currentData.troughs;              % Indices of troughs
+                y_points = currentData.speed(troughs);      % Speed at trough indices
+                plot(app.DataAxis_speed, troughs, y_points, 'bo', 'MarkerSize', 7,  'LineWidth', 2);
+            end
+
+            if isfield(currentData, 'turning_points') && ~isempty(currentData.turning_points)
+                turning_points = currentData.turning_points;              
+                y_points = currentData.speed(turning_points);     
+                plot(app.DataAxis_speed, turning_points, y_points, 'o', ...
+                    'MarkerEdgeColor', [0 0.5 0], ...   % Dark green RGB
+                    'MarkerSize', 7, ...
+                    'LineWidth', 2);
+
+            end
+
+            if isfield(currentData, 'NaN_boundaries') && ~isempty(currentData.NaN_boundaries)
+                NaN_boundaries = currentData.NaN_boundaries;              
+                y_points = currentData.speed(NaN_boundaries);     
+                plot(app.DataAxis_speed, NaN_boundaries, y_points, 'ro', 'MarkerSize', 7,  'LineWidth', 2); 
+            end
+
+
+            hold(app.DataAxis_speed, "off");
+
+
+            % add ylim
+            app.DataAxis_vel.YLim = app.YLimVelAxis;
+            app.DataAxis_speed.YLim = [0, str2double(app.SpeedYLims.Value)];
+            
+            
+
+
+
+            % % Add vertical dotted lines in both panels for dispenser
+            % out/in box in/out
+
+            disp_out = app.AllTrialsData(app.CurrentRowIdx).info.stick_in_out_disp(1);
+            disp_in = app.AllTrialsData(app.CurrentRowIdx).info.stick_in_out_disp(2);
+
+            first_in = app.AllTrialsData(app.CurrentRowIdx).info.first_in_last_out(1);
+            last_out = app.AllTrialsData(app.CurrentRowIdx).info.first_in_last_out(2);
+            middle = (last_out - first_in)/2 + first_in;
+
+            len = length(app.AllTrialsData(app.CurrentRowIdx).(app.bp_plot_selector{app.col_position}).xyz);
+            
+
+            % Adjust xlims
+            items = app.ShowTrialDropDown.Items;
+
+            if strcmp(app.ShowTrialDropDown.Value, items(1))
+                app.DataAxis_vel.XLim = [disp_out + app.window_pre_post_disp(1), len + 50];
+                app.DataAxis_speed.XLim    = [disp_out + app.window_pre_post_disp(1), len + 50];
+
+                if app.PlotPredictionsCheckBox.Value
+                    app.DataAxis_speedPredict.XLim    = [disp_out + app.window_pre_post_disp(1), len + 50];
+                end
+
+            elseif strcmp(app.ShowTrialDropDown.Value, items(2))
+                app.DataAxis_vel.XLim = [disp_out + app.window_pre_post_disp(1), middle + 100];
+                app.DataAxis_speedPredict.XLim    = [disp_out + app.window_pre_post_disp(1), middle + 100];
+
+                if app.PlotPredictionsCheckBox.Value
+                    app.DataAxis_vel.XLim = [disp_out + app.window_pre_post_disp(1), middle + 100];
+                end
+            elseif strcmp(app.ShowTrialDropDown.Value, items(3))
+                app.DataAxis_speed.XLim    = [middle - 100, disp_in + app.window_pre_post_disp(2)];
+
+                if app.PlotPredictionsCheckBox.Value
+                    app.DataAxis_speedPredict.XLim    = [disp_out + app.window_pre_post_disp(1), middle + 100];
+                end
+            elseif strcmp(app.ShowTrialDropDown.Value, items(4))
+                app.DataAxis_vel.XLim = [disp_in - 100, len + 50];
+                app.DataAxis_speed.XLim    = [disp_in - 100, len + 50];
+
+                if app.PlotPredictionsCheckBox.Value
+                    app.DataAxis_speedPredict.XLim    = [disp_out + app.window_pre_post_disp(1), middle + 100];
+                end
+            end
+
+
+
+
+            hold(app.DataAxis_vel, 'on');
+            xline(app.DataAxis_vel, disp_out, 'k', 'LineWidth', 1.5);
+            xline(app.DataAxis_vel, disp_in, 'k', 'LineWidth', 1.5);
+            xline(app.DataAxis_vel, first_in, '--k', 'LineWidth', 1.5);
+            xline(app.DataAxis_vel, last_out, '--k', 'LineWidth', 1.5);
+            hold(app.DataAxis_vel, 'off');
+
+            hold(app.DataAxis_speed, 'on');
+            xline(app.DataAxis_speed, disp_out, 'k', 'LineWidth', 1.5);
+            xline(app.DataAxis_speed, disp_in, 'k', 'LineWidth', 1.5);
+            xline(app.DataAxis_speed, first_in, '--k', 'LineWidth', 1.5);
+            xline(app.DataAxis_speed, last_out, '--k', 'LineWidth', 1.5);
+            hold(app.DataAxis_speed, 'off');
+
+            
+            if app.PlotPredictionsCheckBox.Value
+                app.DataAxis_speedPredict.YLim = [0, str2double(app.SpeedYLims.Value)];
+
+                hold(app.DataAxis_speedPredict, 'on');
+                xline(app.DataAxis_speedPredict, disp_out, 'k', 'LineWidth', 1.5);
+                xline(app.DataAxis_speedPredict, disp_in, 'k', 'LineWidth', 1.5);
+                xline(app.DataAxis_speedPredict, first_in, '--k', 'LineWidth', 1.5);
+                xline(app.DataAxis_speedPredict, last_out, '--k', 'LineWidth', 1.5);
+                hold(app.DataAxis_speedPredict, 'off');
+            end
+
+            % plot motifs as coloured rectangles
+            app.plot_motifs();
+
+
+
+
+
+            % Set Trial label
+            app.CurrentTrial = app.AllTrialsData(app.CurrentRowIdx).trial_num;
+            app.DataAxis_vel.Title.String = sprintf('Trial %d (clu= %d)', app.CurrentTrial, app.chosen_cluster);
+
+            legend(app.DataAxis_vel, [vx, vy, vz], {'v_{x}', 'v_{y}', 'v_{z}'});
+        end
+
+
+        function plot_motifs(app)
+            delete(findall(app.DataAxis_vel, 'Tag', 'xregion1'));
+            delete(findall(app.DataAxis_speed, 'Tag', 'xregion1'));
+            delete(findall(app.DataAxis_speedPredict, 'Tag', 'xregion1'));
+
+            bodyPart = app.bp_plot_selector{app.col_position};
+            if ~isfield(app.AllTrialsData(app.CurrentRowIdx), 'motif_infos') || ~isfield(app.AllTrialsData(app.CurrentRowIdx).motif_infos, bodyPart)
+                return
+            end
+
+
+            motif_info = app.AllTrialsData(app.CurrentRowIdx).motif_infos.(bodyPart);
+
+            if isfield(motif_info, 'labels')
+                labels = motif_info.labels;
+
+                % Find where values change
+                label_change_points = find(diff(labels(:)) ~= 0);
+                % Block start indices: first element + positions after changes
+                start_indices = [1; label_change_points + 1];
+                % Block end indices: positions before changes + last element
+                end_indices = [label_change_points; length(labels)];
+
+                axes = [app.DataAxis_vel, app.DataAxis_speed];
+
+                % Process each block
+                for block_idx = 1:length(start_indices)
+                    block_start = start_indices(block_idx);
+                    block_end = end_indices(block_idx);
+
+                    label_value = labels(block_start);
+
+                    if label_value == 0
+                        % skip background blocks
+                        continue
+                    end
+
+
+                    for ax = axes
+                        region = xregion(ax, block_start, block_end, ...
+                            'FaceColor', app.MotifColors(label_value, :), 'Tag', 'xregion1');
+
+
+                        % Set user data
+                        userdata.motif_pos = [block_start, block_end];
+                        userdata.MotifID = label_value;
+
+
+                        region.UserData = userdata;
+                        region.ButtonDownFcn = @app.clickedCallback;
+                    end
+                end
+            end
+
+
+
+            if app.PlotPredictionsCheckBox.Value && isfield(motif_info, 'predictions')
+                labels = motif_info.predictions;
+
+                % Find where values change
+                label_change_points = find(diff(labels(:)) ~= 0);
+                % Block start indices: first element + positions after changes
+                start_indices = [1; label_change_points + 1];
+                % Block end indices: positions before changes + last element
+                end_indices = [label_change_points; length(labels)];
+
+                % Process each block
+                for block_idx = 1:length(start_indices)
+                    block_start = start_indices(block_idx);
+                    block_end = end_indices(block_idx);
+
+                    label_value = labels(block_start);
+
+                    if label_value == 0
+                        % skip background blocks
+                        continue
+                    end
+
+
+
+                    region = xregion(app.DataAxis_speedPredict, block_start, block_end, ...
+                        'FaceColor', app.MotifColors(label_value, :), 'Tag', 'xregion1');
+
+
+                    % Set user data
+                    userdata.motif_pos = [block_start, block_end];
+                    userdata.MotifID = label_value;
+
+
+                    region.UserData = userdata;
+                    region.ButtonDownFcn = @app.clickedCallback;
+
+                end
+            end
+        end
+
+
+      
+
+        % ------ TrialInspectorTab (Motif labelling)  ------
+
+
+        % PROBLEM: By only having 1 row in motif_infos, we can not
+        % differentiate between motif_info.body_part
+
+        function labelMotif(app, num)
+            if num == 0
+                num = 10;
+            elseif strcmp(num, 'q')
+                num = 11;
+            elseif strcmp(num, 'w')
+                num = 12;
+            elseif strcmp(num, 'r')
+                num = 13;
+            elseif strcmp(num, 't')
+                num = 14;
+            end
+           
+
+            if num > length(app.MotifNames)
+                uialert(app.UIFigure, 'There exists no motif for this key. Check MotifTable', 'Error')
+                return
+            end
+           
+            app.MotifID = num;
+
+
+            
+            bodyPart = app.bp_plot_selector{app.col_position};
+            
+            currentTrial = app.AllTrialsData(app.CurrentRowIdx);
+            if ~isfield(currentTrial, 'motif_infos') || ~isfield(currentTrial.motif_infos, bodyPart) || isempty(currentTrial.motif_infos.(bodyPart)) 
+
+                len = length(app.AllTrialsData(app.CurrentRowIdx).(app.bp_plot_selector{app.col_position}).v_xyz);
+                motif_info.labels = zeros(1, len);
+                motif_info.status = 1; % 1 - man. label (or corrected), 2 - asformer pred
+                
+                app.AllTrialsData(app.CurrentRowIdx).motif_infos.(bodyPart) = motif_info;
+
+            else
+                % MotifLabel already exists, adjust it
+                app.AllTrialsData(app.CurrentRowIdx).motif_infos.(bodyPart).status = 1; % could override 2 -> 1 (for prediction corrections)
+            end
+
+            
+
+           
+            app.MotifPos = [];
+
+            % Clear previous clicks (MUST be outside of function)
+            app.firstClick = [];
+            app.secondClick = [];
+
+            children = app.DataAxis_speed.Children;
+            for i = 1:length(children)
+                children(i).HitTest = 'off'; % Disable click interception by the plot
+            end
+
+            % User clicks motif start, stop
+            app.ReadyForClick = true;
+            app.DataAxis_speed.ButtonDownFcn = @(src, event) app.SelectBoundaries(src, event);
+
+
+            % Wait for new Motif Start, Stop to be determined by userk
+            maxWaitTime = 5;  % seconds
+            waited = 0;
+            dt = 0.1;  % polling interval
+
+            while isempty(app.MotifPos) && waited < maxWaitTime
+                pause(dt);
+                waited = waited + dt;
+            end
+
+            if isempty(app.MotifPos)
+                uialert(app.UIFigure, 'Timeout: MotifPos was not set within 5 seconds.', 'Error');
+                return;
+            end
+
+            app.ApplyMotif();
+
+        end
+
+
+
+        function clickedCallback(app, ~, eventData)
+            data = eventData.Source.UserData;
+            
+            app.MotifID = data.MotifID;
+            app.MotifPos = [data.motif_pos(1), data.motif_pos(2)];
+
+            % update topview plot
+            app.highlight_topview_plot(data.motif_pos(1), data.motif_pos(2))
+            
+            app.MotifStartSpinner.Value = data.motif_pos(1);
+            app.MotifEndSpinner.Value = data.motif_pos(2);
+
+            
+            % Remember whether user clicked closer to motif start, or end
+            click_pos = eventData.Source.Parent.CurrentPoint;  
+            clicked_x = click_pos(1,1);
+        
+            d_start = abs(clicked_x - data.motif_pos(1));
+            d_end = abs(clicked_x - data.motif_pos(2));
+        
+            if d_start < d_end
+                app.CloserTo = 'start';
+            else
+                app.CloserTo = 'end';
+            end
+
+        end
+
+
+        function update_labelled_motifs_xregions(app, varargin)
+            % LineStyle = "--" (dotted line -> potential labelled motif)
+            
+            LineStyle = varargin{1};
+
+            % Delete existing xregions by tag from both axes
+            delete(findall(app.DataAxis_vel, 'Tag', 'xregion2')); % xregion -> template, xregion2 -> labelled motifs
+            delete(findall(app.DataAxis_speed, 'Tag', 'xregion2'));
+                
+            
+            if numel(varargin) == 2 || ~isempty(app.TemplatemotifsDropDown.Value)
+                app.template_xregion1 = xregion(app.DataAxis_vel, app.MotifStartSpinner.Value, app.MotifEndSpinner.Value);
+                app.template_xregion2 = xregion(app.DataAxis_speed, app.MotifStartSpinner.Value, app.MotifEndSpinner.Value);
+                
+                for xpatch = [app.template_xregion1, app.template_xregion2]
+                    xpatch.Tag = 'xregion2';
+                    xpatch.EdgeColor = 'blue'; 
+                    xpatch.LineStyle = LineStyle;
+                    xpatch.LineWidth = 1.5;
+                end
+            else
+                
+            end
+        end
+
+     
+        
+
+
+    function SelectBoundaries(app, src, event)
+        if ~app.ReadyForClick
+            return; % 🛑 Ignore click if not ready
+        end
+
+
+        % If previously selected  zoom in button, turn off
+        z = zoom(app.UIFigure);
+        z.Enable = 'off';
+
+
+        % Get the current point from the axes (first row gives the x,y of the click)
+        clickPoint = app.DataAxis_speed.CurrentPoint;
+        xClicked = clickPoint(1,1);
+
+        if isempty(app.firstClick)
+            % First click: store and update MotifStartSpinner
+            xClicked = round(xClicked);
+            app.firstClick = xClicked;
+
+            if app.StartCheckBox.Value
+                app.MotifStartSpinner.Value = app.snapToNearestTrough(xClicked);
+            else
+                app.MotifStartSpinner.Value = round(xClicked);
+            end
+
+
+        else
+            % Second click: store and update MotifEndSpinner
+            xClicked = round(xClicked);
+            app.secondClick = xClicked;
+
+            if app.EndCheckBox.Value
+                app.MotifEndSpinner.Value = app.snapToNearestTrough(xClicked);
+            else
+                app.MotifEndSpinner.Value = round(xClicked);
+            end
+
+            % Remove the ButtonDownFcn so no further clicks are processed
+            app.DataAxis_speed.ButtonDownFcn = '';
+
+
+
+
+            % turn this off, so we can intercept the line again
+            originalChildren = app.DataAxis_speed.Children;
+            for i = 1:length(originalChildren)
+                try
+                    originalChildren(i).HitTest = 'on';
+                catch
+                    % Safeguard in case any child doesn't have HitTest
+                end
+            end
+
+            app.MotifPos = [app.MotifStartSpinner.Value, app.MotifEndSpinner.Value];
+            app.highlight_topview_plot(app.MotifStartSpinner.Value , app.MotifEndSpinner.Value)
+            app.update_labelled_motifs_xregions("--", "exception");
+        end
+
+    end
+
+  
+
+
+    function ApplyMotif(app)
+
+        new_start = round(app.MotifPos(1));
+        new_end = round(app.MotifPos(2));
+
+        % Scenario where the minima of two consective motifs
+        % overlap (see example below). Since starts are more important
+        % for alignemnt, we shift Motif1 by -1.
+        % Motif1 [0 0 1 1 1 1 0 0 0 0 ]
+        % Motif2 [0 0 0 0 0 2 2 2 2 0 ]
+        % Output [0 0 1 1 1 2 2 2 2 0 ]
+        if app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(new_end) ~= 0
+            new_end = new_end - 1;
+        end
+
+        app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(new_start:new_end) = app.MotifID;
+
+
+
+        % plot motifs as coloured rectangles
+        app.plot_motifs();
+        
+        % Default is for offset to be adjustable by errors
+        app.CloserTo = 'end';
+
+        % update topview plot
+        app.highlight_topview_plot(new_start, new_end)
+        delete(findall(app.DataAxis_vel, 'Tag', 'xregion2')); % xregion -> template, xregion2 -> labelled motifs
+        delete(findall(app.DataAxis_speed, 'Tag', 'xregion2'));
+    end
+
+
+    function get_changepoints(app)
+
+
+        trough_prominence = app.TroughprominenceSpinner.Value;
+        peak_prominence = app.PeakprominenceSpinner.Value;
+        gradient_threshold = app.GradientthresholdSpinner.Value;
+        distance = 2;
+        width = 2;
+        max_speed = 50;
+
+        
+        for row_idx = 1:length(app.AllTrialsData)
+
+            speed = app.AllTrialsData(row_idx).(app.bp_plot_selector{app.col_position}).speed;
+
+            % Find troughs (minima) using findpeaks on -speed
+            [~, troughs] = findpeaks(-speed, 'MinPeakProminence', trough_prominence, 'MinPeakDistance', distance);
+
+            % Find peaks (maxima) using findpeaks on speed
+            [~, peaks] = findpeaks(speed, 'MinPeakProminence', peak_prominence, ...
+                'MinPeakDistance', distance, ...
+                'MinPeakWidth', width);
+
+            turning_points = mov_find_nearest_turning_points(speed, peaks, gradient_threshold, max_speed);
+
+            % Remove turning points that are too close to any trough
+            keep = true(size(turning_points));
+            for i = 1:length(turning_points)
+                if any(abs(turning_points(i) - troughs) <= 1)
+                    keep(i) = false;
+                end
+            end
+            turning_points = turning_points(keep);
+
+
+
+
+            NaN_boundaries = app.get_NaN_boundaries(row_idx);
+
+            app.AllTrialsData(row_idx).(app.bp_plot_selector{app.col_position}).troughs = troughs;
+            app.AllTrialsData(row_idx).(app.bp_plot_selector{app.col_position}).turning_points = turning_points;
+            app.AllTrialsData(row_idx).(app.bp_plot_selector{app.col_position}).NaN_boundaries = NaN_boundaries;
+
+
+            changepoints = [troughs(:); NaN_boundaries(:); turning_points(:)];
+            app.AllTrialsData(row_idx).(app.bp_plot_selector{app.col_position}).changepoints = changepoints;
+        end
+
+              
+    end
+
+    function NaN_boundaries = get_NaN_boundaries(app, row_idx)
+
+        v_xyz = app.AllTrialsData(row_idx).(app.bp_plot_selector{app.col_position}).v_xyz; % shape N, 3
+        
+        is_valid = ~isnan(v_xyz); 
+        A = all(is_valid, 2);
+        A = A(:)';
+        transitions = diff([0 A 0]);
+    
+        % Where values start after NaNs (NaN → value)
+        nan_to_val_idx = find(transitions == 1);   % rising edge
+    
+        % Where values end before NaNs (value → NaN)
+        val_to_nan_idx = find(transitions == -1) - 1;  % falling edge
+    
+        NaN_boundaries = [nan_to_val_idx val_to_nan_idx];
+        NaN_boundaries = double(NaN_boundaries);
+    end
+    
+    function snappedVal = snapToNearestTrough(app, xClicked)
+        % Gets the closest trough to xClicked for the given row_idx and col_position
+        troughs = app.AllTrialsData(app.CurrentRowIdx).(app.bp_plot_selector{app.col_position}).changepoints;
+        [~, idx] = min(abs(troughs - xClicked));
+        snappedVal = round(troughs(idx));
+
+    end
+ 
+    function fill_MotifsTable(app)
+        % Clear existing table data
+        app.MotifsTable.Data = {};
+
+        % Create table data (one column of motif template names with suffixes)
+        numMotifs = numel(app.MotifNames);
+        data = cell(numMotifs, 1);
+
+        for i = 1:numMotifs
+            if i == 10
+                suffix = sprintf('Press 0 for %d', i);
+            elseif i == 11
+                suffix = sprintf('Press q for %d', i);
+            elseif i == 12
+                suffix = sprintf('Press w for %d', i);
+            elseif i == 13
+                suffix = sprintf('Press r for %d', i);
+            elseif i == 14
+                suffix = sprintf('Press t for %d', i);
+            else
+                suffix = sprintf('Press %d', i);
+            end
+
+
+            data{i} = sprintf('%s (%s)', app.MotifNames{i}, suffix);
+        end
+
+        % Apply data to table
+        app.MotifsTable.Data = data;
+        app.MotifsTable.ColumnName = {'Motifs'};
+        app.MotifsTable.ColumnEditable = false;
+        app.MotifsTable.RowName = {};
+
+        % Apply color styling using uistyle (modern approach)
+        for i = 1:numMotifs
+            blendFactor = 0.5;  % 0 = full color, 1 = full white
+            rgb = (1 - blendFactor) * app.MotifColors(i, :) + blendFactor * [1 1 1];
+            cellStyle = uistyle('BackgroundColor', rgb);
+            addStyle(app.MotifsTable, cellStyle, 'cell', [i, 1]);
+        end
+    end
+
+    function getPredictions(app)
+
+        path = 'C:\Users\aksel\Documents\Code\diffact\result\s3d_dlc50\prediction';
+
+
+        files = dir(fullfile(path, 'trial_*.npy'));
+
+
+
+
+        for k = 1:length(files)
+
+            [~, name, ~] = fileparts(files(k).name); 
+            trial_num_str = regexp(name, '(\d+)', 'match');  
+            trial_num = str2double(trial_num_str{1}); 
+            
+
+            
+
+
+            prediction_data = readNPY(fullfile(path, files(k).name)); 
+
+            row_idx = find([app.AllTrialsData.trial_num] == trial_num, 1);
+              
+            % 200 HARD CODED; may need to adjust
+            disp_out = app.AllTrialsData(row_idx).info.stick_in_out_disp(1);
+
+
+            if (disp_out - 200) <= 0
+                N = 0;
+            elseif (disp_out - 200) > 0
+                N = disp_out - 200;
+            end
+            
+            predictions = [zeros(N, 1); double(prediction_data)];
+
+
+            app.AllTrialsData(row_idx).motif_infos.(app.bp_plot_selector{app.col_position}).predictions = predictions;
+        end
+
+
+    end
+  
+    
+    end
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app)
+            clc
+ 
+           
+
+            % Click left/right keyboard
+            app.UIFigure.KeyPressFcn = createCallbackFcn(app, @UIFigureKeyPress, true);
+
+
+
+            % Used identically (for RefTrial, ShowTrial, TopView plot)
+            app.BodypartDropDown.Items = app.bp_plot_selector; % 
+            
+
+            % Makes sure a user can only select a single row in MotifTable
+            app.MotifsTable.SelectionType = 'cell';
+
+
+            % Set Y-axis limits using properties
+            app.DataAxis_vel.YLim = app.YLimVelAxis;
+
+
+
+
+            % create angle color map
+            color_map = hsv(360);
+            color_map(361, :) = [0,0,0];
+            app.AngleColorMap = color_map;
+
+
+
+            % Link y-axis zooming and panning (not for y-axis as they
+            % are different for the panels and shouldn't be in the same scale)
+            addlistener(app.DataAxis_speed, 'XLim', 'PostSet', @(src, event) app.syncAxes(app.DataAxis_speed, app.DataAxis_vel));
+            addlistener(app.DataAxis_vel, 'XLim', 'PostSet', @(src, event) app.syncAxes(app.DataAxis_vel, app.DataAxis_speed));
+        end
+
+        % Value changed function: BodypartDropDown
+        function BodypartDropDownValueChanged(app, event)
+            body_part = app.BodypartDropDown.Value;
+
+
+            % E.g. if change DropDown, body_part="beakTip" (index=2), then
+            % app.col_position = 2
+            app.col_position = find(strcmp(app.bp_plot_selector, body_part));
+
+            if body_part == "all grey" % override
+                app.col_position = find(strcmp(app.bp_plot_selector, body_part));
+            end
+            
+            app.plot_topview();
+            app.show_trial();
+        end
+
+        % Value changed function: SelectTrialDropDown
+        function SelectTrialDropDownValueChanged(app, event)
+            
+            app.SelectTrialDropDownActivated = true;
+
+            app.newTrial();
+
+
+            app.show_trial();
+            app.plot_topview();
+        end
+
+        % Button pushed function: DataNextButton
+        function DataNextButtonPushed(app, event)
+            app.func_DataNextButtonPushed();
+        end
+
+        % Button pushed function: DataPrevButton
+        function DataPrevButtonPushed(app, event)
+            app.func_DataPrevButtonPushed();
+        end
+
+        % Button pushed function: SaveAllMotifdataButton
+        function SaveAllMotifdataButtonPushed(app, event)
+            app.save_AllTrials()
+
+            app.SelectTrialDropDownActivated = false;
+            
+            if app.PDFCheckBox.Value == 1
+                chosenClusters = app.getClustersForMotifs();
+
+                for clu = chosenClusters
+                    txt = sprintf('cluster %d', clu);
+                    app.SelectclusterIDDropDown.Value = txt;
+                    app.filter_trials_byclu();
+                    app.update_SelectTrialDropDown();
+                    app.exportSpeedPanelsToPDF()
+                end
+            end
+
+            app.DataSavedLabel.Text = strcat("Saved motifs in: ", fullfile(app.DataPath, "Trial_data.mat"));
+        end
+
+        % Close request function: UIFigure
+        function UIFigureCloseRequest(app, event)
+            if ~app.FilesSaved
+                selection = uiconfirm(app.UIFigure, ...
+                    'You have unsaved changes. Do you want to save before closing?', ...
+                    'Unsaved Files', ...
+                    'Options', {'Save and Exit', 'Exit without Saving', 'Cancel'}, ...
+                    'DefaultOption', 1, ...
+                    'CancelOption', 3);
+
+                switch selection
+                    case 'Save and Exit'
+                        % Call your save function (define if not already done)
+                        app.save_AllTrials();
+                        app.FilesSaved = true;
+                    case 'Exit without Saving'
+                        % Proceed
+                    case 'Cancel'
+                        return;  % Cancel closing
+                end
+            end
+
+            % Close all other open figures (created by GUI)
+            figHandles = findall(0, 'Type', 'figure');
+            for k = 1:length(figHandles)
+                if ~isequal(figHandles(k), app.UIFigure)
+                    close(figHandles(k));
+                end
+            end
+
+            % Close the app
+            delete(app);
+        end
+
+        % Button pushed function: DeletedataforButton
+        function DeletedataforButtonPushed(app, event)
+            template_name = app.DeleteMotifDataDropDown.Value;
+
+
+            if strcmp(template_name, 'all')
+                if isfield(app.AllTrialsData, 'motif_infos')
+                    app.AllTrialsData = rmfield(app.AllTrialsData, 'motif_infos');
+                end
+            elseif strcmp(template_name, 'this trial')
+                    app.AllTrialsData(app.CurrentRowIdx).motif_infos = [];
+            else
+                for i = 1:length(app.AllTrialsData)
+                    if isfield(app.AllTrialsData(i), 'motif_infos') && ~isempty(app.AllTrialsData(i).motif_infos) && ~isempty(app.AllTrialsData(i).motif_infos.(app.bp_plot_selector{app.col_position}))
+                        match_nr = find(strcmp(app.MotifNames, template_name));                        
+                        app.AllTrialsData(i).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.AllTrialsData(i).motif_infos.(app.bp_plot_selector{app.col_position}).labels == match_nr) = 0;
+                    end
+                end
+            end
+
+            app.show_trial();
+        end
+
+        % Button pushed function: DeleteDButton
+        function DeleteDButtonPushed(app, event)
+            
+            app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.MotifPos(1):app.MotifPos(2)) = 0;
+            app.plot_motifs();
+        end
+
+        % Value changed function: MotifStartSpinner
+        function MotifStartSpinnerValueChanged(app, event)
+            % Reset last clicked motif
+            app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.MotifPos(1):app.MotifPos(2)) = 0;
+            
+            app.MotifPos = [app.MotifStartSpinner.Value, app.MotifEndSpinner.Value];
+            app.highlight_topview_plot(app.MotifStartSpinner.Value , app.MotifEndSpinner.Value)
+            app.update_labelled_motifs_xregions("--", "exception");    
+        end
+
+        % Value changed function: MotifEndSpinner
+        function MotifEndSpinnerValueChanged(app, event)
+            % Reset last clicked motif
+            app.AllTrialsData(app.CurrentRowIdx).motif_infos.(app.bp_plot_selector{app.col_position}).labels(app.MotifPos(1):app.MotifPos(2)) = 0;
+
+            app.MotifPos = [app.MotifStartSpinner.Value, app.MotifEndSpinner.Value];
+            app.highlight_topview_plot(app.MotifStartSpinner.Value , app.MotifEndSpinner.Value)
+            app.update_labelled_motifs_xregions("--", "exception");    
+        end
+
+        % Button pushed function: PlotchangepointsButton
+        function PlotchangepointsButtonPushed(app, event)
+            app.get_changepoints();
+            app.show_trial();
+        end
+
+        % Cell selection callback: MotifsTable
+        function MotifsTableCellSelection(app, event)
+            num = event.Indices(1);
+            app.labelMotif(num);
+        end
+
+        % Button pushed function: ApplyAButton
+        function ApplyAButtonPushed(app, event)
+            app.ApplyMotif();
+        end
+
+        % Value changed function: SpeedYLims
+        function SpeedYLimsValueChanged(app, event)
+            app.show_trial();
+        end
+
+        % Button pushed function: Button2
+        function Button2Pushed(app, event)
+            app.getPredictions();
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Get the file path for locating images
+            pathToMLAPP = fileparts(mfilename('fullpath'));
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.Position = [100 100 1243 941];
+            app.UIFigure.Name = 'MATLAB App';
+            app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
+
+            % Create TabGroup
+            app.TabGroup = uitabgroup(app.UIFigure);
+            app.TabGroup.Position = [1 11 1244 931];
+
+            % Create ClusteringTab
+            app.ClusteringTab = uitab(app.TabGroup);
+            app.ClusteringTab.Title = 'Clustering';
+
+            % Create GridLayout
+            app.GridLayout = uigridlayout(app.ClusteringTab);
+            app.GridLayout.ColumnWidth = {'1x', '1.5x', '1.5x'};
+            app.GridLayout.RowHeight = {63, '1x', 130};
+            app.GridLayout.ColumnSpacing = 0;
+            app.GridLayout.Padding = [0 10 0 10];
+
+            % Create SelectSessionPanel
+            app.SelectSessionPanel = uipanel(app.GridLayout);
+            app.SelectSessionPanel.BorderType = 'none';
+            app.SelectSessionPanel.TitlePosition = 'centertop';
+            app.SelectSessionPanel.Title = 'Select Session';
+            app.SelectSessionPanel.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.SelectSessionPanel.Layout.Row = 1;
+            app.SelectSessionPanel.Layout.Column = [1 3];
+            app.SelectSessionPanel.FontSize = 14;
+
+            % Create ImportButton
+            app.ImportButton = uibutton(app.SelectSessionPanel, 'push');
+            app.ImportButton.Position = [451 8 81 27];
+            app.ImportButton.Text = 'Import';
+
+            % Create Folder
+            app.Folder = uiimage(app.SelectSessionPanel);
+            app.Folder.Position = [406 5 45 32];
+            app.Folder.ImageSource = fullfile(pathToMLAPP, 'assets', 'OneDrive_Folder_Icon.svg.png');
+
+            % Create PathEditFieldLabel
+            app.PathEditFieldLabel = uilabel(app.SelectSessionPanel);
+            app.PathEditFieldLabel.HorizontalAlignment = 'right';
+            app.PathEditFieldLabel.Position = [184 10 30 22];
+            app.PathEditFieldLabel.Text = 'Path';
+
+            % Create SessionPathEditField
+            app.SessionPathEditField = uieditfield(app.SelectSessionPanel, 'text');
+            app.SessionPathEditField.Position = [229 8 173 26];
+
+            % Create TrialInspectorTab
+            app.TrialInspectorTab = uitab(app.TabGroup);
+            app.TrialInspectorTab.Title = 'Trial Inspector';
+
+            % Create GridLayout7
+            app.GridLayout7 = uigridlayout(app.TrialInspectorTab);
+            app.GridLayout7.ColumnWidth = {'1.7x', '0.9x', '1.46x'};
+            app.GridLayout7.RowHeight = {45, '4.12x', 50, '3.65x'};
+            app.GridLayout7.ColumnSpacing = 0;
+            app.GridLayout7.Padding = [0 10 0 10];
+
+            % Create VelSpeedPanel
+            app.VelSpeedPanel = uipanel(app.GridLayout7);
+            app.VelSpeedPanel.BorderType = 'none';
+            app.VelSpeedPanel.TitlePosition = 'centertop';
+            app.VelSpeedPanel.Layout.Row = 2;
+            app.VelSpeedPanel.Layout.Column = [1 3];
+            app.VelSpeedPanel.FontSize = 14;
+
+            % Create GridLayout10
+            app.GridLayout10 = uigridlayout(app.VelSpeedPanel);
+            app.GridLayout10.ColumnWidth = {'11.64x'};
+            app.GridLayout10.RowHeight = {'1x', '1x', '1x'};
+
+            % Create DataAxis_speed
+            app.DataAxis_speed = uiaxes(app.GridLayout10);
+            zlabel(app.DataAxis_speed, 'Z')
+            app.DataAxis_speed.YLim = [0 200];
+            app.DataAxis_speed.Layout.Row = 2;
+            app.DataAxis_speed.Layout.Column = 1;
+
+            % Create DataAxis_vel
+            app.DataAxis_vel = uiaxes(app.GridLayout10);
+            zlabel(app.DataAxis_vel, 'Z')
+            app.DataAxis_vel.YLim = [-200 200];
+            app.DataAxis_vel.XTick = [0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1];
+            app.DataAxis_vel.Layout.Row = 1;
+            app.DataAxis_vel.Layout.Column = 1;
+
+            % Create DataAxis_speedPredict
+            app.DataAxis_speedPredict = uiaxes(app.GridLayout10);
+            app.DataAxis_speedPredict.Layout.Row = 3;
+            app.DataAxis_speedPredict.Layout.Column = 1;
+
+            % Create TrialMenubar
+            app.TrialMenubar = uipanel(app.GridLayout7);
+            app.TrialMenubar.BorderType = 'none';
+            app.TrialMenubar.TitlePosition = 'centertop';
+            app.TrialMenubar.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.TrialMenubar.Layout.Row = 1;
+            app.TrialMenubar.Layout.Column = [1 3];
+            app.TrialMenubar.FontSize = 14;
+
+            % Create AxisResetButton
+            app.AxisResetButton = uibutton(app.TrialMenubar, 'push');
+            app.AxisResetButton.Position = [1164 11 72 29];
+            app.AxisResetButton.Text = 'Axis Reset';
+
+            % Create BodypartDropDown
+            app.BodypartDropDown = uidropdown(app.TrialMenubar);
+            app.BodypartDropDown.ValueChangedFcn = createCallbackFcn(app, @BodypartDropDownValueChanged, true);
+            app.BodypartDropDown.Position = [720 15 65 22];
+
+            % Create BodypartLabel
+            app.BodypartLabel = uilabel(app.TrialMenubar);
+            app.BodypartLabel.Position = [668 15 53 22];
+            app.BodypartLabel.Text = 'Bodypart';
+
+            % Create LabelAdjustMotifsPanel
+            app.LabelAdjustMotifsPanel = uipanel(app.GridLayout7);
+            app.LabelAdjustMotifsPanel.TitlePosition = 'centertop';
+            app.LabelAdjustMotifsPanel.Title = 'Label / Adjust Motifs';
+            app.LabelAdjustMotifsPanel.Layout.Row = 4;
+            app.LabelAdjustMotifsPanel.Layout.Column = 3;
+            app.LabelAdjustMotifsPanel.FontSize = 14;
+
+            % Create DeleteDButton
+            app.DeleteDButton = uibutton(app.LabelAdjustMotifsPanel, 'push');
+            app.DeleteDButton.ButtonPushedFcn = createCallbackFcn(app, @DeleteDButtonPushed, true);
+            app.DeleteDButton.FontColor = [0 0 0];
+            app.DeleteDButton.Position = [219 295 70 22];
+            app.DeleteDButton.Text = 'Delete (D)';
+
+            % Create StartSpinnerLabel_2
+            app.StartSpinnerLabel_2 = uilabel(app.LabelAdjustMotifsPanel);
+            app.StartSpinnerLabel_2.HorizontalAlignment = 'right';
+            app.StartSpinnerLabel_2.Position = [122 309 30 22];
+            app.StartSpinnerLabel_2.Text = 'Start';
+
+            % Create MotifStartSpinner
+            app.MotifStartSpinner = uispinner(app.LabelAdjustMotifsPanel);
+            app.MotifStartSpinner.Limits = [1 Inf];
+            app.MotifStartSpinner.ValueChangedFcn = createCallbackFcn(app, @MotifStartSpinnerValueChanged, true);
+            app.MotifStartSpinner.Position = [165 307 48 24];
+            app.MotifStartSpinner.Value = 1;
+
+            % Create EndSpinnerLabel_2
+            app.EndSpinnerLabel_2 = uilabel(app.LabelAdjustMotifsPanel);
+            app.EndSpinnerLabel_2.HorizontalAlignment = 'right';
+            app.EndSpinnerLabel_2.Position = [125 281 26 22];
+            app.EndSpinnerLabel_2.Text = 'End';
+
+            % Create MotifEndSpinner
+            app.MotifEndSpinner = uispinner(app.LabelAdjustMotifsPanel);
+            app.MotifEndSpinner.Limits = [1 Inf];
+            app.MotifEndSpinner.ValueChangedFcn = createCallbackFcn(app, @MotifEndSpinnerValueChanged, true);
+            app.MotifEndSpinner.Position = [165 281 48 22];
+            app.MotifEndSpinner.Value = 1;
+
+            % Create StartCheckBox
+            app.StartCheckBox = uicheckbox(app.LabelAdjustMotifsPanel);
+            app.StartCheckBox.Text = 'Start';
+            app.StartCheckBox.Position = [13 187 60 21];
+            app.StartCheckBox.Value = true;
+
+            % Create EndCheckBox
+            app.EndCheckBox = uicheckbox(app.LabelAdjustMotifsPanel);
+            app.EndCheckBox.Text = 'End';
+            app.EndCheckBox.Position = [14 163 48 21];
+            app.EndCheckBox.Value = true;
+
+            % Create CircleconstraintLabel
+            app.CircleconstraintLabel = uilabel(app.LabelAdjustMotifsPanel);
+            app.CircleconstraintLabel.FontWeight = 'bold';
+            app.CircleconstraintLabel.Position = [11 209 72 30];
+            app.CircleconstraintLabel.Text = {'Circle'; 'constraint:'};
+
+            % Create MotifsTable
+            app.MotifsTable = uitable(app.LabelAdjustMotifsPanel);
+            app.MotifsTable.ColumnName = {'Column 1'; 'Column 2'; 'Column 3'; 'Column 4'};
+            app.MotifsTable.RowName = {};
+            app.MotifsTable.CellSelectionCallback = createCallbackFcn(app, @MotifsTableCellSelection, true);
+            app.MotifsTable.Position = [88 5 348 268];
+
+            % Create LabelmodeCheckbox
+            app.LabelmodeCheckbox = uicheckbox(app.LabelAdjustMotifsPanel);
+            app.LabelmodeCheckbox.Text = {'Shortcuts '; 'activated'};
+            app.LabelmodeCheckbox.Position = [5 290 76 30];
+            app.LabelmodeCheckbox.Value = true;
+
+            % Create ApplyAButton
+            app.ApplyAButton = uibutton(app.LabelAdjustMotifsPanel, 'push');
+            app.ApplyAButton.ButtonPushedFcn = createCallbackFcn(app, @ApplyAButtonPushed, true);
+            app.ApplyAButton.Position = [367 292 66 26];
+            app.ApplyAButton.Text = 'Apply (A)';
+
+            % Create EditEButton
+            app.EditEButton = uibutton(app.LabelAdjustMotifsPanel, 'push');
+            app.EditEButton.Position = [293 294 70 23];
+            app.EditEButton.Text = 'Edit (E)';
+
+            % Create TopViewPanel
+            app.TopViewPanel = uipanel(app.GridLayout7);
+            app.TopViewPanel.TitlePosition = 'centertop';
+            app.TopViewPanel.Title = 'Top View';
+            app.TopViewPanel.Layout.Row = 4;
+            app.TopViewPanel.Layout.Column = 1;
+            app.TopViewPanel.FontSize = 14;
+
+            % Create GridLayout8
+            app.GridLayout8 = uigridlayout(app.TopViewPanel);
+            app.GridLayout8.ColumnWidth = {'5x', '1x'};
+            app.GridLayout8.RowHeight = {'0.02x', '1x'};
+
+            % Create GridLayout9
+            app.GridLayout9 = uigridlayout(app.GridLayout8);
+            app.GridLayout9.ColumnWidth = {'1x'};
+            app.GridLayout9.RowHeight = {'1x', '1x', '1x', '1x', '1x', '1x'};
+            app.GridLayout9.Layout.Row = 2;
+            app.GridLayout9.Layout.Column = 2;
+
+            % Create CreateMotifsPanel
+            app.CreateMotifsPanel = uipanel(app.GridLayout7);
+            app.CreateMotifsPanel.TitlePosition = 'centertop';
+            app.CreateMotifsPanel.Title = 'Create Motifs';
+            app.CreateMotifsPanel.Layout.Row = 4;
+            app.CreateMotifsPanel.Layout.Column = 2;
+            app.CreateMotifsPanel.FontSize = 14;
+
+            % Create CreateMotifErrorLabel
+            app.CreateMotifErrorLabel = uilabel(app.CreateMotifsPanel);
+            app.CreateMotifErrorLabel.FontSize = 10;
+            app.CreateMotifErrorLabel.Position = [199 307 70 20];
+            app.CreateMotifErrorLabel.Text = '';
+
+            % Create TroughprominenceLabel
+            app.TroughprominenceLabel = uilabel(app.CreateMotifsPanel);
+            app.TroughprominenceLabel.HorizontalAlignment = 'right';
+            app.TroughprominenceLabel.FontColor = [0 0 0];
+            app.TroughprominenceLabel.Tooltip = {'''The troughs (or valleys) have to pass this threshold in terms of depth for a minima (black circle). See further: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.find_peaks.html'';'};
+            app.TroughprominenceLabel.Position = [10 275 68 30];
+            app.TroughprominenceLabel.Text = {'Trough '; 'prominence'};
+
+            % Create TroughprominenceSpinner
+            app.TroughprominenceSpinner = uispinner(app.CreateMotifsPanel);
+            app.TroughprominenceSpinner.Limits = [0 Inf];
+            app.TroughprominenceSpinner.FontColor = [0 0 0];
+            app.TroughprominenceSpinner.Tooltip = {''};
+            app.TroughprominenceSpinner.Position = [83 283 54 22];
+            app.TroughprominenceSpinner.Value = 0.5;
+
+            % Create RelheightprominenceLabel
+            app.RelheightprominenceLabel = uilabel(app.CreateMotifsPanel);
+            app.RelheightprominenceLabel.HorizontalAlignment = 'right';
+            app.RelheightprominenceLabel.FontColor = [0 0 0];
+            app.RelheightprominenceLabel.Position = [142 272 68 30];
+            app.RelheightprominenceLabel.Text = {'Peak '; 'prominence'};
+
+            % Create PeakprominenceSpinner
+            app.PeakprominenceSpinner = uispinner(app.CreateMotifsPanel);
+            app.PeakprominenceSpinner.Limits = [0 Inf];
+            app.PeakprominenceSpinner.FontColor = [0 0 0];
+            app.PeakprominenceSpinner.Position = [215 280 53 22];
+            app.PeakprominenceSpinner.Value = 5;
+
+            % Create PlotchangepointsButton
+            app.PlotchangepointsButton = uibutton(app.CreateMotifsPanel, 'push');
+            app.PlotchangepointsButton.ButtonPushedFcn = createCallbackFcn(app, @PlotchangepointsButtonPushed, true);
+            app.PlotchangepointsButton.Position = [83 193 93 38];
+            app.PlotchangepointsButton.Text = {'Plot '; 'changepoints'};
+
+            % Create RelheightprominenceLabel_2
+            app.RelheightprominenceLabel_2 = uilabel(app.CreateMotifsPanel);
+            app.RelheightprominenceLabel_2.HorizontalAlignment = 'right';
+            app.RelheightprominenceLabel_2.FontColor = [0 0 0];
+            app.RelheightprominenceLabel_2.Position = [156 238 54 30];
+            app.RelheightprominenceLabel_2.Text = {'Gradient '; 'threshold'};
+
+            % Create GradientthresholdSpinner
+            app.GradientthresholdSpinner = uispinner(app.CreateMotifsPanel);
+            app.GradientthresholdSpinner.Limits = [0 5];
+            app.GradientthresholdSpinner.FontColor = [0 0 0];
+            app.GradientthresholdSpinner.Position = [215 246 53 22];
+            app.GradientthresholdSpinner.Value = 1;
+
+            % Create FindminimaLabel
+            app.FindminimaLabel = uilabel(app.CreateMotifsPanel);
+            app.FindminimaLabel.FontWeight = 'bold';
+            app.FindminimaLabel.FontColor = [0 0 1];
+            app.FindminimaLabel.Position = [33 306 76 22];
+            app.FindminimaLabel.Text = 'Find minima';
+
+            % Create FindturningpointsLabel
+            app.FindturningpointsLabel = uilabel(app.CreateMotifsPanel);
+            app.FindturningpointsLabel.FontWeight = 'bold';
+            app.FindturningpointsLabel.FontColor = [0.2314 0.6667 0.1961];
+            app.FindturningpointsLabel.Position = [149 306 114 22];
+            app.FindturningpointsLabel.Text = 'Find turning points';
+
+            % Create PlotPredictionsCheckBox
+            app.PlotPredictionsCheckBox = uicheckbox(app.CreateMotifsPanel);
+            app.PlotPredictionsCheckBox.Text = 'Plot Predictions';
+            app.PlotPredictionsCheckBox.Position = [17 10 105 22];
+            app.PlotPredictionsCheckBox.Value = true;
+
+            % Create Button2
+            app.Button2 = uibutton(app.CreateMotifsPanel, 'push');
+            app.Button2.ButtonPushedFcn = createCallbackFcn(app, @Button2Pushed, true);
+            app.Button2.Position = [13 85 100 23];
+            app.Button2.Text = 'Button2';
+
+            % Create Panel_2
+            app.Panel_2 = uipanel(app.GridLayout7);
+            app.Panel_2.Layout.Row = 3;
+            app.Panel_2.Layout.Column = [1 3];
+
+            % Create DataPrevButton
+            app.DataPrevButton = uibutton(app.Panel_2, 'push');
+            app.DataPrevButton.ButtonPushedFcn = createCallbackFcn(app, @DataPrevButtonPushed, true);
+            app.DataPrevButton.Position = [624 11 30 27];
+            app.DataPrevButton.Text = '◀';
+
+            % Create DataNextButton
+            app.DataNextButton = uibutton(app.Panel_2, 'push');
+            app.DataNextButton.ButtonPushedFcn = createCallbackFcn(app, @DataNextButtonPushed, true);
+            app.DataNextButton.Position = [660 11 30 27];
+            app.DataNextButton.Text = '▶';
+
+            % Create SaveAllMotifdataButton
+            app.SaveAllMotifdataButton = uibutton(app.Panel_2, 'push');
+            app.SaveAllMotifdataButton.ButtonPushedFcn = createCallbackFcn(app, @SaveAllMotifdataButtonPushed, true);
+            app.SaveAllMotifdataButton.FontWeight = 'bold';
+            app.SaveAllMotifdataButton.Position = [929 11 116 27];
+            app.SaveAllMotifdataButton.Text = 'Save All Motif data';
+
+            % Create SelectTrialDropDown
+            app.SelectTrialDropDown = uidropdown(app.Panel_2);
+            app.SelectTrialDropDown.ValueChangedFcn = createCallbackFcn(app, @SelectTrialDropDownValueChanged, true);
+            app.SelectTrialDropDown.Position = [514 13 100 22];
+
+            % Create DeletedataforButton
+            app.DeletedataforButton = uibutton(app.Panel_2, 'push');
+            app.DeletedataforButton.ButtonPushedFcn = createCallbackFcn(app, @DeletedataforButtonPushed, true);
+            app.DeletedataforButton.FontColor = [1 0 0];
+            app.DeletedataforButton.Position = [743 5 59 38];
+            app.DeletedataforButton.Text = {'Delete '; 'data for:'};
+
+            % Create DataSavedLabel
+            app.DataSavedLabel = uilabel(app.Panel_2);
+            app.DataSavedLabel.WordWrap = 'on';
+            app.DataSavedLabel.FontSize = 10;
+            app.DataSavedLabel.FontColor = [0.4667 0.6745 0.1882];
+            app.DataSavedLabel.Position = [1096 7 139 34];
+            app.DataSavedLabel.Text = '';
+
+            % Create DeleteMotifDataDropDown
+            app.DeleteMotifDataDropDown = uidropdown(app.Panel_2);
+            app.DeleteMotifDataDropDown.FontColor = [1 0 0];
+            app.DeleteMotifDataDropDown.Position = [807 13 71 22];
+
+            % Create SpeedYLims
+            app.SpeedYLims = uidropdown(app.Panel_2);
+            app.SpeedYLims.Items = {'150', '70'};
+            app.SpeedYLims.ValueChangedFcn = createCallbackFcn(app, @SpeedYLimsValueChanged, true);
+            app.SpeedYLims.Position = [400 15 72 22];
+            app.SpeedYLims.Value = '150';
+
+            % Create ContextMenu
+            app.ContextMenu = uicontextmenu(app.UIFigure);
+
+            % Create Menu
+            app.Menu = uimenu(app.ContextMenu);
+            app.Menu.Text = 'Menu';
+
+            % Create Menu2
+            app.Menu2 = uimenu(app.ContextMenu);
+            app.Menu2.Text = 'Menu2';
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = StrippedApp
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            % Execute the startup function
+            runStartupFcn(app, @startupFcn)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end
