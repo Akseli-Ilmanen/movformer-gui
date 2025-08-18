@@ -1003,49 +1003,6 @@ classdef StrippedApp < matlab.apps.AppBase
             addStyle(app.MotifsTable, cellStyle, 'cell', [i, 1]);
         end
     end
-
-    function getPredictions(app)
-
-        path = 'C:\Users\aksel\Documents\Code\diffact\result\s3d_dlc50\prediction';
-
-
-        files = dir(fullfile(path, 'trial_*.npy'));
-
-
-
-
-        for k = 1:length(files)
-
-            [~, name, ~] = fileparts(files(k).name); 
-            trial_num_str = regexp(name, '(\d+)', 'match');  
-            trial_num = str2double(trial_num_str{1}); 
-            
-
-            
-
-
-            prediction_data = readNPY(fullfile(path, files(k).name)); 
-
-            row_idx = find([app.AllTrialsData.trial_num] == trial_num, 1);
-              
-            % 200 HARD CODED; may need to adjust
-            disp_out = app.AllTrialsData(row_idx).info.stick_in_out_disp(1);
-
-
-            if (disp_out - 200) <= 0
-                N = 0;
-            elseif (disp_out - 200) > 0
-                N = disp_out - 200;
-            end
-            
-            predictions = [zeros(N, 1); double(prediction_data)];
-
-
-            app.AllTrialsData(row_idx).motif_infos.(app.bp_plot_selector{app.col_position}).predictions = predictions;
-        end
-
-
-    end
   
     
     end

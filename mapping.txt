@@ -1,0 +1,15 @@
+0 background
+1 beakTip_pullOutStick
+2 beakTip_diagonalToBox
+3 beakTip_toss
+4 beakTip_toFrontLeftCorner
+5 beakTip_reachToWall
+6 beakTip_right
+7 beakTip_pullOutPellet
+8 beakTip_swoopOut
+9 beakTip_stickToDisp
+10 beakTip_stickInDisp
+11 beakTip_rightToPellet
+12 beakTip_snapPellet
+13 beakTip_eat
+14 beakTip_curvedRight
