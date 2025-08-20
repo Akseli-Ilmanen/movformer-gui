@@ -6,15 +6,18 @@ except ImportError:
 from .meta_widget import MetaWidget
 from .data_widget import DataWidget
 from .labels_widget import LabelsWidget
-from .lineplot_widget import LinePlotWidget
-from .state_manager import GUIStateManager
+from .lineplot import LinePlot
+from plot_utils import get_motif_colours, plot_ds_variable
+from file_utils import load_motif_mapping
 
 __all__ = (
     "MetaWidget",
     "DataWidget", 
     "LabelsWidget",
     "LinePlotWidget",
-    "GUIStateManager",
+    "get_motif_colours",
+    "plot_ds_variable",
+    "load_motif_mapping",
 )
 
 # from .reader import napari_get_reader

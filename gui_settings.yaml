@@ -1,0 +1,18 @@
+yaml_path: C:\Users\Admin\Documents\Akseli\Code\movformer-gui\gui_settings.yaml
+file_path: C:/Users/Admin/Documents/Akseli/AI_data/derivatives/sub-03_id-Freddy/ses-000_date-20250527_01/behav/Trial_data.nc
+video_folder: C:/Users/Admin/Documents/Akseli/VidData/20250527_01_Freddy
+current_trial: 1
+current_keypoint: beakTip
+current_variable: pos
+current_color_variable: null
+current_trial_condition_key: null
+current_trial_condition_value: null
+color_variables:
+- angle_rgb
+cameras:
+- cam1_files
+- cam2_files
+mics: []
+fps_playback: 100
+ymin: 0.0
+window_size: 3.0

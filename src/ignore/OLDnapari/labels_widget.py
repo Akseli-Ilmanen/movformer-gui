@@ -103,7 +103,7 @@ class LabelsWidget(QWidget):
             time.sleep(1.0 / fps)
 
 
-try:
-    from qtpy.QtWidgets import QApplication
-except ImportError:
-    QApplication = None
+    try:
+        from qtpy.QtWidgets import QApplication
+    except ImportError:
+        QApplication = None

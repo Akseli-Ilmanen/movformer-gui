@@ -25,7 +25,7 @@ class MovementMetaWidget(CollapsibleWidgetContainer):
         )
 
         self.loader = self.collapsible_widgets[0]
-        self.loader.expand()  # expand the loader widget by default
+        self.loader.expand()  # expand the first widget
 
         # Add the playback widget
         self.add_widget(

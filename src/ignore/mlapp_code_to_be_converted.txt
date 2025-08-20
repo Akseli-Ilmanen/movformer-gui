@@ -284,10 +284,7 @@ classdef StrippedApp < matlab.apps.AppBase
                     app.plot_motifs();
                 end
 
-                % Play video of motif
-                if strcmp(event.Key, 'v')
-                    app.play_video(app.MotifPos(1), app.MotifPos(2))
-                end
+
 
             end
 
