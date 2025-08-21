@@ -1,6 +1,7 @@
 """Collapsible widget to control settings for all plots."""
 
-from qtpy.QtWidgets import QWidget, QFormLayout, QLineEdit
+from qtpy.QtWidgets import QFormLayout, QLineEdit, QWidget
+
 
 class PlotsWidget(QWidget):
     """Plots controls.
@@ -11,18 +12,15 @@ class PlotsWidget(QWidget):
       - window_size_s
     """
 
-    def __init__(self, lineplot=None, parent=None, previous_state=None):
+    def __init__(self, lineplot=None, parent=None):
         super().__init__(parent=parent)
         self.plot_widget = lineplot  # Use the shared LinePlot instance
 
         # Load yaml
         self.parent()._load_from_yaml()
 
-
         layout = QFormLayout()
         self.setLayout(layout)
-
-        
 
         self.ymin_edit = QLineEdit()
         self.ymax_edit = QLineEdit()
@@ -36,7 +34,6 @@ class PlotsWidget(QWidget):
         layout.addRow("Y max:", self.ymax_edit)
         layout.addRow("Window size (s):", self.window_s_edit)
 
-
         # Wire events
         self.ymin_edit.editingFinished.connect(self._on_edited)
         self.ymax_edit.editingFinished.connect(self._on_edited)
@@ -49,7 +46,7 @@ class PlotsWidget(QWidget):
             ymax = self._parse_float(self.ymax_edit.text())
             window_s = self._parse_float(self.window_s_edit.text())
             self.plot_widget.apply_axes_from_state(ymin, ymax, window_s)
-            if hasattr(self.plot_widget, 'canvas'):
+            if hasattr(self.plot_widget, "canvas"):
                 self.plot_widget.canvas.draw()
 
     def set_plot_widget(self, plot_widget):
@@ -60,7 +57,7 @@ class PlotsWidget(QWidget):
             ymax = self._parse_float(self.ymax_edit.text())
             window_s = self._parse_float(self.window_s_edit.text())
             self.plot_widget.apply_axes_from_state(ymin, ymax, window_s)
-            if hasattr(self.plot_widget, 'canvas'):
+            if hasattr(self.plot_widget, "canvas"):
                 self.plot_widget.canvas.draw()
 
     def _parse_float(self, text):
@@ -85,11 +82,8 @@ class PlotsWidget(QWidget):
         self.ymax = self._parse_float(self.ymax_edit.text())
         self.window_size = self._parse_float(self.window_s_edit.text())
 
-
         if self.plot_widget is not None:
             # Pass the current settings to the LinePlot
             self.plot_widget.apply_axes_from_state(self.ymin, self.ymax, self.window_size)
-            if hasattr(self.plot_widget, 'canvas'):
+            if hasattr(self.plot_widget, "canvas"):
                 self.plot_widget.canvas.draw()
-
-

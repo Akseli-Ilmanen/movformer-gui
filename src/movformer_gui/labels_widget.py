@@ -1,214 +1,234 @@
 """Widget for labeling segments in movement data."""
 
-import numpy as np
-from typing import Optional, Dict, Tuple, Any
-from pathlib import Path
 import time as _time
+from pathlib import Path
+from typing import Any
 
-from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QAbstractItemView, QApplication
-)
-from qtpy.QtCore import Signal, Qt, QEvent
-from qtpy.QtGui import QColor, QCursor
-
-from napari.viewer import Viewer
+import numpy as np
 from matplotlib.patches import Rectangle
+from napari.viewer import Viewer
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor
+from qtpy.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QHBoxLayout,
+    QHeaderView,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from plot_utils import get_motif_colours
 from file_utils import load_motif_mapping
 from label_utils import snap_to_nearest_changepoint
-from movformer_gui.state_manager import State
+from movformer_gui.app_state import ObservableAppState
 
 
 class LabelsWidget(QWidget):
     """Widget for labeling movement motifs in time series data."""
-    
-    def __init__(self, napari_viewer: Viewer, lineplot=None, parent=None):
+
+    def __init__(self, napari_viewer: Viewer, lineplot=None, parent=None, app_state=None):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         self.lineplot = lineplot  # Store reference to shared LinePlot
         self.data_widget = None  # Will be set via set_data_widget()
-    
+
+        # Use provided app_state or create new one
+        self.app_state = app_state if app_state else ObservableAppState()
 
         # Make widget focusable for keyboard events
         self.setFocusPolicy(Qt.StrongFocus)
-        
+
         # Remove Qt event filter and key event logic
         # Instead, rely on napari's @viewer.bind_key for global shortcuts
         # Shortcut bindings are now handled outside the widget
-        
-        
+
         # Labeling state
-        self.motif_mappings: Dict[int, Dict[str, Any]] = {}
+        self.motif_mappings: dict[int, dict[str, Any]] = {}
         self.ready_for_click = False
         self.first_click = None
         self.second_click = None
         self.selected_motif_id = 0
 
         # Current motif selection for editing
-        self.current_motif_pos = None  # [start, end] idx of selected motif
-        self.current_motif_id = None   # ID of currently selected motif
-        
+        self.current_motif_pos: list[int] | None = None  # [start, end] idx of selected motif
+        self.current_motif_id: int | None = None  # ID of currently selected motif
+
         # Playback control
         self.is_playing = False
-        
+
         # UI components
         self.motifs_table = None
-        
+
         self._setup_ui()
-        path = Path(__file__).parent.parent.parent / "mapping.txt" # change location in the future
+        path = Path(__file__).parent.parent.parent / "mapping.txt"  # change location in the future
         self.motif_mappings = load_motif_mapping(path)
         self._populate_motifs_table()
 
         # Connect plot click if lineplot is available
 
-        self.lineplot.canvas.mpl_connect('button_press_event', self._on_plot_clicked)
-
-    def getState(self):
-        """Return (ds, current_trial, current_keypoint) from State."""
-        self.ds = State.get("ds")
-        self.current_trial = State.get("current_trial")
-        self.fps_playback = State.get("fps_playback", 30)
-        self.current_keypoint = State.get("current_keypoint", None)
-        
-        return self
-
+        self.lineplot.canvas.mpl_connect("button_press_event", self._on_plot_clicked)
 
     def plot_all_motifs(self, time_data=None, labels=None):
         """Plot all motifs for current trial and keypoint based on current labels state.
-        
+
         This implements state-based plotting similar to the MATLAB plot_motifs() function.
         It clears all existing motif rectangles and redraws them based on the current labels.
         """
         if labels is None:
             return
-                    
+
         ax = self.lineplot.ax
-        
+
         # Clear all existing motif patches (similar to delete(findall(..., 'Tag', 'xregion1')))
-        patches_to_remove = [patch for patch in ax.patches if hasattr(patch, 'get_label') 
-                           and patch.get_label() == 'motif']
+        patches_to_remove = [
+            patch
+            for patch in ax.patches
+            if hasattr(patch, "get_label") and patch.get_label() == "motif"
+        ]
         for patch in patches_to_remove:
             patch.remove()
-        
+
         try:
 
             # Get y-axis limits for rectangles
             ylim = ax.get_ylim()
-            
+
             # Find all labeled segments and plot them
             current_motif_id = 0
             segment_start = None
-            
+
             for i, label in enumerate(labels):
                 if label != 0:  # Start of a motif or continuing one
                     if label != current_motif_id:  # New motif starts
                         # End previous motif if it exists
                         if current_motif_id != 0 and segment_start is not None:
-                            self._draw_motif_rectangle(ax, time_data[segment_start], time_data[i-1], 
-                                                     current_motif_id, ylim)
-                        
+                            self._draw_motif_rectangle(
+                                ax,
+                                time_data[segment_start],
+                                time_data[i - 1],
+                                current_motif_id,
+                                ylim,
+                            )
+
                         # Start new motif
                         current_motif_id = label
                         segment_start = i
 
                 else:  # End of current motif
                     if current_motif_id != 0 and segment_start is not None:
-                        self._draw_motif_rectangle(ax, time_data[segment_start], time_data[i-1], 
-                                                 current_motif_id, ylim)
+                        self._draw_motif_rectangle(
+                            ax,
+                            time_data[segment_start],
+                            time_data[i - 1],
+                            current_motif_id,
+                            ylim,
+                        )
                         current_motif_id = 0
                         segment_start = None
-            
+
             # Handle case where motif continues to the end
             if current_motif_id != 0 and segment_start is not None:
-                self._draw_motif_rectangle(ax, time_data[segment_start], time_data[-1], 
-                                         current_motif_id, ylim)
-            
+                self._draw_motif_rectangle(
+                    ax,
+                    time_data[segment_start],
+                    time_data[-1],
+                    current_motif_id,
+                    ylim,
+                )
 
             self.lineplot.canvas.draw()
-                
-        except Exception as e:
+
+        except (KeyError, IndexError, AttributeError) as e:
             print(f"Error plotting motifs: {e}")
 
-    def _draw_motif_rectangle(self, ax, start_time: float, end_time: float, motif_id: int, ylim: Tuple[float, float]):
+    def _draw_motif_rectangle(
+        self,
+        ax,
+        start_time: float,
+        end_time: float,
+        motif_id: int,
+        ylim: tuple[float, float],
+    ):
         """Draw a single motif rectangle."""
         if motif_id not in self.motif_mappings:
             return
-            
-        color = self.motif_mappings[motif_id]['color']
-        
+
+        color = self.motif_mappings[motif_id]["color"]
+
         # Create rectangle
-        rect = Rectangle((start_time, ylim[0]), end_time - start_time, 
-                        ylim[1] - ylim[0], 
-                        facecolor=color, alpha=0.7, linewidth=1)
-        rect.set_label('motif')  # Tag for identification
+        rect = Rectangle(
+            (start_time, ylim[0]),
+            end_time - start_time,
+            ylim[1] - ylim[0],
+            facecolor=color,
+            alpha=0.7,
+            linewidth=1,
+        )
+        rect.set_label("motif")  # Tag for identification
         ax.add_patch(rect)
-            
 
     def _setup_ui(self):
         """Set up the user interface."""
         layout = QVBoxLayout()
         self.setLayout(layout)
-        
+
         # Create motifs table
         self._create_motifs_table()
-        
+
         # Create control buttons
         self._create_control_buttons()
-        
+
         layout.addWidget(self.motifs_table)
         layout.addWidget(self.controls_widget)
-        
+
     def _create_motifs_table(self):
         """Create the motifs table showing available motif types."""
         self.motifs_table = QTableWidget()
         self.motifs_table.setColumnCount(3)
         self.motifs_table.setHorizontalHeaderLabels(["ID", "Name", "Color"])
-        
+
         # Hide row numbers (left column)
         self.motifs_table.verticalHeader().setVisible(False)
-        
+
         # Set column widths
         header = self.motifs_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)  # ID column - fixed width
         header.setSectionResizeMode(1, QHeaderView.Stretch)  # Name column - stretches
         header.setSectionResizeMode(2, QHeaderView.Fixed)  # Color column - fixed width
-        
+
         # Set specific widths for ID and Color columns
         self.motifs_table.setColumnWidth(0, 20)  # ID column narrow
         self.motifs_table.setColumnWidth(2, 20)  # Color column narrow
-        
+
         self.motifs_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.motifs_table.setMaximumHeight(250)
-        
 
     def _create_control_buttons(self):
         """Create control buttons for labeling operations."""
         self.controls_widget = QWidget()
         layout = QHBoxLayout()
         self.controls_widget.setLayout(layout)
-        
-        
+
         # Delete button
         self.delete_button = QPushButton("Delete (D)")
         self.delete_button.setShortcut("D")
         self.delete_button.clicked.connect(self._delete_motif)
         layout.addWidget(self.delete_button)
-        
+
         # Edit button
         self.edit_button = QPushButton("Edit (E)")
         self.edit_button.setShortcut("E")
         self.edit_button.clicked.connect(self._edit_motif)
         layout.addWidget(self.edit_button)
-        
+
         # Play button
         self.play_button = QPushButton("Play (V)")
         self.play_button.setShortcut("V")
         self.play_button.clicked.connect(self._play_segment)
         layout.addWidget(self.play_button)
-        
-  
 
     # Centralized mapping between motif_id and shortcut key
     MOTIF_ID_TO_KEY = {
@@ -221,7 +241,7 @@ class LabelsWidget(QWidget):
     # Also provide reverse mapping for key to motif_id
     KEY_TO_MOTIF_ID = {v.lower(): k for k, v in MOTIF_ID_TO_KEY.items()}
     # Add numeric keys for motif_id 0-9
-    for i in range(0, 10):
+    for i in range(10):
         KEY_TO_MOTIF_ID[str(i)] = i
         MOTIF_ID_TO_KEY[i] = str(i)
 
@@ -242,16 +262,14 @@ class LabelsWidget(QWidget):
 
             # Color column
             color_item = QTableWidgetItem()
-            color = data['color']
+            color = data["color"]
             qcolor = QColor(int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
             color_item.setBackground(qcolor)
             self.motifs_table.setItem(row, 2, color_item)
 
-
-
     def activate_motif(self, motif_key):
         """Activate a motif by shortcut: select row, set up for labeling, and scroll to row."""
-  
+
         # Convert key to motif ID using centralized1 mapping
         motif_id = self.KEY_TO_MOTIF_ID.get(str(motif_key).lower(), motif_key)
         # Check if motif ID is valid
@@ -271,11 +289,9 @@ class LabelsWidget(QWidget):
         self.first_click = None
         self.second_click = None
 
-
-        print(f"Ready to label motif {motif_id} ({self.motif_mappings[motif_id]['name']}) - click twice to define region")
-
-
-
+        print(
+            f"Ready to label motif {motif_id} ({self.motif_mappings[motif_id]['name']}) - click twice to define region"
+        )
 
     def _on_plot_clicked(self, event):
         """Handle mouse clicks on the lineplot widget."""
@@ -284,27 +300,27 @@ class LabelsWidget(QWidget):
         if x_clicked is None:
             return
 
-        # Get current data info
-        self.getState()
-        self.labels = self.ds.sel(trial=self.current_trial, keypoints=self.current_keypoint).labels.values
-
+        # Get current data from app_state
+        labels = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        ).labels.values
 
         if event.button == 1 and not self.ready_for_click:
             # Select motif -> Then can delete or edit.
-            self._check_motif_click(x_clicked)
+            self._check_motif_click(x_clicked, labels)
 
-        
         # Handle right-click - play video of motif if clicking on one
         if event.button == 3:  # Right mouse button
-            if self._check_motif_click(x_clicked):
+            if self._check_motif_click(x_clicked, labels):
                 self._play_segment()
             return
-        
+
         # Handle left-click for labeling/editing (only in label mode)
         if event.button == 1 and self.ready_for_click:
 
             # Snap to nearest changepoint if available
-            x_clicked_idx = int(x_clicked * self.ds.fps)  # Convert to frame index
+            x_clicked_idx = int(x_clicked * self.app_state.ds.fps)  # Convert to frame index
             x_snapped = self._snap_to_changepoint(x_clicked_idx)
 
             if self.first_click is None:
@@ -315,104 +331,106 @@ class LabelsWidget(QWidget):
                 self.second_click = x_snapped
                 self._apply_motif()  # Automatically apply after two clicks
 
-
-    
-
-            
-       
-    def _check_motif_click(self, x_clicked: float) -> bool:
+    def _check_motif_click(self, x_clicked: float, labels: np.ndarray) -> bool:
         """Check if the click is on an existing motif and select it if so. Move left and right until you find its start and stop idxs."""
 
-            
-        try:
-            
-            # Check if there's a motif at this position
-            frame_idx = int(x_clicked * self.ds.fps)
-            motif_id = int(self.labels[frame_idx])
+        # Check if there's a motif at this position
+        frame_idx = int(x_clicked * self.app_state.ds.fps)
+        motif_id = int(labels[frame_idx])
 
-            if motif_id != 0:
+        if motif_id != 0:
+            # Find the start and end of this motif
+            motif_start = frame_idx
+            motif_end = frame_idx
 
-                # Find the start and end of this motif
-                motif_start = frame_idx
-                motif_end = frame_idx
+            # Find start
+            while motif_start > 0 and labels[motif_start - 1] == motif_id:
+                motif_start -= 1
 
-                # Find start
-                while motif_start > 0 and self.labels[motif_start - 1] == motif_id:
-                    motif_start -= 1
-                
-                # Find end
-                while motif_end < len(self.labels) - 1 and self.labels[motif_end + 1] == motif_id:
-                    motif_end += 1
-                
-                # Select this motif
-                self.current_motif_id = motif_id
-                self.current_motif_pos = [motif_start, motif_end]
-                self.selected_motif_id = motif_id
-                return True
-                
-        except Exception as e:
-            print(f"Error checking motif click: {e}")
-            
+            # Find end
+            while motif_end < len(labels) - 1 and labels[motif_end + 1] == motif_id:
+                motif_end += 1
 
+            # Select this motif
+            self.current_motif_id = motif_id
+            self.current_motif_pos = [motif_start, motif_end]
+            self.selected_motif_id = motif_id
+            return True
+        else:
+            return False
 
     def _snap_to_changepoint(self, x_clicked_idx: float) -> float:
         """Snap the clicked x-coordinate to the nearest changepoint."""
 
-        try:
-
-            # Get changepoints for current trial and keypoint
-            changepoints_data = self.ds.sel(trial=self.current_trial, keypoints=self.current_keypoint)['changepoints'].values
-
-            # Find changepoint times
-            changepoint_indices = np.where(changepoints_data)[0]
-            if len(changepoint_indices) == 0:
-                return x_clicked_idx
-                
-            snapped_val, _ = snap_to_nearest_changepoint(x_clicked_idx, changepoint_indices)
-
-            return snapped_val
-            
-        except Exception as e:
-            print(f"Error snapping to changepoint: {e} Returning clicked:")
+        # Check if "changepoints" exists and is a binary vector
+        if "changepoints" not in self.app_state.ds:
             return x_clicked_idx
- 
-        return False
-        
-    
 
-    
+        changepoints_data = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        )["changepoints"].values
+
+        if changepoints_data is None or not np.array_equal(
+            changepoints_data, changepoints_data.astype(bool)
+        ):
+            return x_clicked_idx
+
+        # Get changepoints for current trial and keypoint
+        changepoints_data = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        )["changepoints"].values
+
+        # Find changepoint times
+        changepoint_indices = np.where(changepoints_data)[0]
+        if len(changepoint_indices) == 0:
+            return x_clicked_idx
+
+        snapped_val, _ = snap_to_nearest_changepoint(x_clicked_idx, changepoint_indices)
+        return snapped_val
+
     def _apply_motif(self):
         """Apply the selected motif to the selected time range."""
         if self.first_click is None or self.second_click is None:
             return
-        
-        try:
-            start_idx = self.first_click
-            end_idx = self.second_click
 
-            # Handle overlapping labels (as in MATLAB code)
-            if self.labels[end_idx] != 0:
-                end_idx = end_idx - 1
-            
-            # Apply the new label
-            self.labels[start_idx:end_idx+1] = self.selected_motif_id
+        # Get current labels from app_state
+        labels = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        ).labels.values
 
+        start_idx = self.first_click
+        end_idx = self.second_click
 
-            # Reset selection
-            self.first_click = None
-            self.second_click = None
-            self.ready_for_click = False
+        # Handle overlapping labels (as in MATLAB code)
+        if labels[end_idx] != 0:
+            end_idx = end_idx - 1
 
-            # save updated ds globally
-            self.ds["labels"].loc[dict(trial=self.current_trial, keypoints=self.current_keypoint)] = self.labels
-            State.set("ds", self.ds)
+        # Apply the new label
+        labels[start_idx : end_idx + 1] = self.selected_motif_id
 
-            time_data = self.ds.sel(trial=self.current_trial, keypoints=self.current_keypoint).time.values
-            self.plot_all_motifs(time_data, self.labels)
+        # Reset selection
+        self.first_click = None
+        self.second_click = None
+        self.ready_for_click = False
 
-        except Exception as e:
-            print(f"Error applying motif: {e}")
-    
+        # Save updated labels back to dataset
+        self.app_state.ds["labels"].loc[
+            {
+                "trial": self.app_state.current_trial,
+                "keypoints": self.app_state.current_keypoint,
+            }
+        ] = labels
+
+        # Update plot
+        time_data = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        ).time.values
+        self.plot_all_motifs(time_data, labels)
+
     def _delete_motif(self):
 
         if self.current_motif_pos is None:
@@ -420,26 +438,33 @@ class LabelsWidget(QWidget):
 
         start, end = self.current_motif_pos
 
+        # Get current labels from app_state
+        labels = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        ).labels.values
+
         # Clear labels in the selected range (set to 0)
-        self.labels[start:end+1] = 0
-        
+        labels[start : end + 1] = 0
+
         # Clear selection
         self.current_motif_pos = None
         self.current_motif_id = None
-        
 
-        # save updated ds globally
-        self.ds["labels"].loc[dict(trial=self.current_trial, keypoints=self.current_keypoint)] = self.labels
-        State.set("ds", self.ds)
+        # Save updated labels back to dataset
+        self.app_state.ds["labels"].loc[
+            {
+                "trial": self.app_state.current_trial,
+                "keypoints": self.app_state.current_keypoint,
+            }
+        ] = labels
 
-        time_data = self.ds.sel(trial=self.current_trial, keypoints=self.current_keypoint).time.values
-        self.plot_all_motifs(time_data, self.labels)
-        
-      
-
-  
-
-
+        # Update plot
+        time_data = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        ).time.values
+        self.plot_all_motifs(time_data, labels)
 
     def _edit_motif(self):
         """Enter edit mode for adjusting motif boundaries."""
@@ -449,34 +474,41 @@ class LabelsWidget(QWidget):
 
         old_start, old_end = self.current_motif_pos
 
+        # Get current labels from app_state
+        labels = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        ).labels.values
+
         # Clear labels in the selected range (set to 0)
-        self.labels[old_start:old_end+1] = 0
+        labels[old_start : old_end + 1] = 0
 
         new_start, new_end = self.first_click, self.second_click
-        self.labels[new_start:new_end+1] = self.selected_motif_id
+        labels[new_start : new_end + 1] = self.selected_motif_id
 
         # Clear current selection
         self.current_motif_pos = None
-        self.current_motif_id = None     
-        
-        # save updated ds globally
-        self.ds["labels"].loc[dict(trial=self.current_trial, keypoints=self.current_keypoint)] = self.labels
-        State.set("ds", self.ds)    
+        self.current_motif_id = None
 
-        time_data = self.ds.sel(trial=self.current_trial, keypoints=self.current_keypoint).time.values
-        self.plot_all_motifs(time_data, self.labels)
-    
-        
+        # Save updated labels back to dataset
+        self.app_state.ds["labels"].loc[
+            {
+                "trial": self.app_state.current_trial,
+                "keypoints": self.app_state.current_keypoint,
+            }
+        ] = labels
 
+        # Update plot
+        time_data = self.app_state.ds.sel(
+            trial=self.app_state.current_trial,
+            keypoints=self.app_state.current_keypoint,
+        ).time.values
+        self.plot_all_motifs(time_data, labels)
 
     def _set_frame(self, frame_idx: int) -> bool:
         """Set the current frame in the napari viewer."""
-        try:
-            self.viewer.dims.set_current_step(0, frame_idx)
-            return True
-        except Exception as e:
-            print(f"Error setting frame: {e}")
-            return False
+        self.viewer.dims.set_current_step(0, frame_idx)
+        return True
 
     def _play_segment(self) -> bool:
         """Play a segment of the video between start and end times using the viewer.
@@ -484,50 +516,43 @@ class LabelsWidget(QWidget):
         """
         try:
 
-
-
             # If already playing, stop the current playback
             if self.is_playing:
                 self.is_playing = False
                 return False
-            
+
             # Check if we have a valid motif position
             if not self.current_motif_pos:
-                return False        
+                return False
 
-
-            
-            self.getState()  # for fps_playback
-            
             # Get start and end times from current motif position
             start_frame = self.current_motif_pos[0]
             end_frame = self.current_motif_pos[1]
-            
+
             if start_frame >= end_frame:
                 return False
-            
+
             # Set playback flag (can be used to interrupt previous playback)
-            self.is_playing = True 
-            
+            self.is_playing = True
+
             fps_value = self.fps_playback if self.fps_playback is not None else 30
             frame_interval = 1.0 / max(int(fps_value), 1)
             self._set_frame(start_frame)
-            
+
             for frame in range(start_frame, end_frame + 1):
                 # Check if playback was interrupted
                 if not self.is_playing:
                     return False
-                    
+
                 self._set_frame(frame)
                 if QApplication is not None:
                     QApplication.processEvents()
                 _time.sleep(frame_interval)
 
-
             self.is_playing = False
             return True
-            
-        except Exception as e:
-            self.is_playing = False 
+
+        except (AttributeError, ValueError, RuntimeError) as e:
+            self.is_playing = False
             print(f"Error playing segment: {e}")
             return False

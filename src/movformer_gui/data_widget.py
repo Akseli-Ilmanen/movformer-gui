@@ -1,14 +1,9 @@
 """Widget for selecting start/stop times and playing a segment in napari."""
 
-from typing import Any, Dict, Optional
-from pathlib import Path
-import yaml
-import numpy as np
 import os
-import subprocess
-import platform
-import xarray as xr
-from typing import Optional
+
+import numpy as np
+from napari.utils.notifications import show_error
 from napari.viewer import Viewer
 from qtpy.QtWidgets import (
     QComboBox,
@@ -19,17 +14,28 @@ from qtpy.QtWidgets import (
     QPushButton,
     QWidget,
 )
-from qtpy.QtCore import QTimer, Signal
 
-from movformer_gui.lineplot import LinePlot
-from movformer_gui.data_loader import validate_media_folder, load_dataset
-from movformer_gui.data_loader import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SUPPORTED_EXTENSIONS
-from movformer_gui.state_manager import State
+from movformer_gui.app_state import ObservableAppState
+from movformer_gui.data_loader import (
+    AUDIO_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    load_dataset,
+    validate_media_folder,
+)
+
 
 class DataWidget(QWidget):
     """Widget to control which data is loaded, displayed and stored for next time."""
 
-    def __init__(self, napari_viewer: Viewer, lineplot=None, parent=None, previous_state=None, labels_widget=None, plots_widget=None):
+    def __init__(
+        self,
+        napari_viewer: Viewer,
+        lineplot=None,
+        parent=None,
+        labels_widget=None,
+        plots_widget=None,
+        app_state=None,
+    ):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         self.setLayout(QFormLayout())
@@ -37,49 +43,20 @@ class DataWidget(QWidget):
         self.labels_widget = labels_widget
         self.plots_widget = plots_widget
 
-        # In case yaml empty, init as None
-        self.current_trial = None
-        self.current_keypoint = None
-        self.current_variable = None
-        self.current_color_variable = None
-        self.current_trial_condition_key = None
-        self.current_trial_condition_value = None
-        self.trial_condition_keys = []
-        self.ready = False
-
-        # Apply previous settings
-        if previous_state:
-            for key, value in previous_state.items():
-                setattr(self, key, value)
-
-
-       
-
-
-
-        # Initialize UI components references
-        # Remove: self.LinePlot = None  
-
-
-        # Set up config settings auto-save timer (every 10 seconds)
-        
-        # self.save_timer = QTimer()
-        # self.save_timer.timeout.connect(self._auto_save_state)
-        # self.save_timer.start(10000)  # 10000 milliseconds = 10 seconds
-
+        # Use provided app_state (should always be provided by meta_widget)
+        self.app_state = app_state if app_state else ObservableAppState()
 
         self.create_path_folder_widgets()
         self._create_load_button()
         self._create_trial_controls()
 
-        if previous_state and hasattr(self, 'file_path'):
-            self.file_path_edit.setText(getattr(self, 'file_path', ''))
-        if previous_state and hasattr(self, 'video_folder'):
-            self.video_folder_edit.setText(getattr(self, 'video_folder', ''))
-        if previous_state and hasattr(self, 'audio_folder'):
-            self.audio_folder_edit.setText(getattr(self, 'audio_folder', ''))
-
-
+        # Restore UI text fields from app state
+        if self.app_state.file_path:
+            self.file_path_edit.setText(self.app_state.file_path)
+        if self.app_state.video_folder:
+            self.video_folder_edit.setText(self.app_state.video_folder)
+        if self.app_state.audio_folder:
+            self.audio_folder_edit.setText(self.app_state.audio_folder)
 
     def _create_path_widget(self, label: str, object_name: str, browse_callback):
         """Generalized function to create a line edit and browse button for file/folder paths."""
@@ -100,19 +77,18 @@ class DataWidget(QWidget):
         self.file_path_edit = self._create_path_widget(
             label="File path:",
             object_name="file_path",
-            browse_callback=lambda: self.on_browse_clicked("file")
+            browse_callback=lambda: self.on_browse_clicked("file"),
         )
         self.video_folder_edit = self._create_path_widget(
             label="Video folder:",
             object_name="video_folder",
-            browse_callback=lambda: self.on_browse_clicked("folder", "video")
+            browse_callback=lambda: self.on_browse_clicked("folder", "video"),
         )
         self.audio_folder_edit = self._create_path_widget(
             label="Audio folder:",
             object_name="audio_folder",
-            browse_callback=lambda: self.on_browse_clicked("folder", "audio")
+            browse_callback=lambda: self.on_browse_clicked("folder", "audio"),
         )
-
 
     def _create_load_button(self):
         """Create a button to load the file to the viewer."""
@@ -120,18 +96,16 @@ class DataWidget(QWidget):
         self.load_button.setObjectName("load_button")
         self.load_button.clicked.connect(lambda: self.on_load_clicked())
         self.layout().addRow(self.load_button)
-    
 
-    
     def _create_trial_controls(self):
         """Create controls for trial selection and navigation."""
-        
+
         # Video file dropdown
         self.camera_combo = QComboBox()
         self.camera_combo.setObjectName("camera_combo")
         self.camera_combo.currentTextChanged.connect(self._on_camera_changed)
         self.camera_combo.addItem("")  # Initialize empty
-        
+
         # Audio file dropdown
         self.mic_combo = QComboBox()
         self.mic_combo.setObjectName("mic_combo")
@@ -155,14 +129,14 @@ class DataWidget(QWidget):
         self.keypoint_combo.setObjectName("keypoint_combo")
         self.keypoint_combo.currentTextChanged.connect(self._on_keypoint_changed)
         self.layout().addRow("Keypoint:", self.keypoint_combo)
-        
+
         # Variable dropdown
         self.variable_combo = QComboBox()
         self.variable_combo.setObjectName("variable_combo")
         # Don't add items here - they'll be populated when ds is loaded
         self.variable_combo.currentTextChanged.connect(self._on_variable_changed)
         self.layout().addRow("Variable:", self.variable_combo)
-        
+
         # Color variable dropdown (for RGB coloring)
         self.color_variable_combo = QComboBox()
         self.color_variable_combo.setObjectName("color_variable_combo")
@@ -173,13 +147,17 @@ class DataWidget(QWidget):
         # Trial condition filtering with two dropdowns
         self.trial_condition_key_combo = QComboBox()
         self.trial_condition_key_combo.setObjectName("trial_condition_key_combo")
-        self.trial_condition_key_combo.currentTextChanged.connect(self._on_trial_condition_key_changed)
-        
+        self.trial_condition_key_combo.currentTextChanged.connect(
+            self._on_trial_condition_key_changed
+        )
+
         self.trial_condition_value_combo = QComboBox()
         self.trial_condition_value_combo.setObjectName("trial_condition_value_combo")
         self.trial_condition_value_combo.addItem("None")  # Default option for no filtering
-        self.trial_condition_value_combo.currentTextChanged.connect(self._on_trial_condition_value_changed)
-        
+        self.trial_condition_value_combo.currentTextChanged.connect(
+            self._on_trial_condition_value_changed
+        )
+
         # Create horizontal layout for the two dropdowns
         self.trial_condition_layout = QHBoxLayout()
         self.trial_condition_layout.addWidget(self.trial_condition_key_combo)
@@ -196,26 +174,21 @@ class DataWidget(QWidget):
         self.prev_button = QPushButton("Previous Trial")
         self.prev_button.setObjectName("prev_button")
         self.prev_button.clicked.connect(self._on_prev_trial)
-        
+
         self.next_button = QPushButton("Next Trial")
         self.next_button.setObjectName("next_button")
         self.next_button.clicked.connect(self._on_next_trial)
-        
+
         # Layout for navigation buttons
         self.nav_layout = QHBoxLayout()
         self.nav_layout.addWidget(self.prev_button)
         self.nav_layout.addWidget(self.next_button)
         self.layout().addRow("Navigation:", self.nav_layout)
 
-        
-        
         # Initially disable trial controls until data is loaded
         self._set_trial_controls_enabled(False)
 
-
-
-
-    def on_browse_clicked(self, browse_type: str = "file", media_type: Optional[str] = None):
+    def on_browse_clicked(self, browse_type: str = "file", media_type: str | None = None):
         """
         Open a file or folder dialog to select a file or folder.
 
@@ -232,9 +205,9 @@ class DataWidget(QWidget):
             file_path = result[0] if result and len(result) >= 1 else ""
             if not file_path:
                 return
-            
+
             self.file_path_edit.setText(file_path)
-            self.file_path = file_path
+            self.app_state.file_path = file_path
 
         elif browse_type == "folder":
             caption = "Select folder containing "
@@ -242,152 +215,150 @@ class DataWidget(QWidget):
                 caption += f"video files ({' '.join(VIDEO_EXTENSIONS)})"
             elif media_type == "audio":
                 caption += f"audio files ({' '.join(AUDIO_EXTENSIONS)})"
-            folder_path = QFileDialog.getExistingDirectory(
-                None,
-                caption=caption
-            )
+            folder_path = QFileDialog.getExistingDirectory(None, caption=caption)
 
             if media_type == "video" and validate_media_folder(folder_path, "video"):
                 self.video_folder_edit.setText(folder_path)
-                self.video_folder = folder_path
+                self.app_state.video_folder = folder_path
             elif media_type == "audio" and validate_media_folder(folder_path, "audio"):
                 self.audio_folder_edit.setText(folder_path)
-                self.audio_folder = folder_path
+                self.app_state.audio_folder = folder_path
             else:
-                raise ValueError(f"Selected folder does not contain valid {media_type} files or is empty.")
-
+                raise ValueError(
+                    f"Selected folder does not contain valid {media_type} files or is empty."
+                )
 
     def on_load_clicked(self):
         """Load the file and show line plot in napari dock."""
         file_path = self.file_path_edit.text()
 
-        
         ds, info, error = load_dataset(file_path)
         if error:
             raise ValueError(f"Failed to load dataset: {error}")
 
-        
-        self.ds = ds
-        State.set("ds", ds)
-        
-        trials = ds.coords['trial'].values.tolist()
-        self.available_variables = [
-            var for var in ds.data_vars
+        self.app_state.ds = ds
+
+        trials = ds.coords["trial"].values.tolist()
+        available_variables = [
+            var
+            for var in ds.data_vars
             if "type" in ds[var].attrs and ds[var].attrs["type"] == "feature"
         ]
         print(f"Successfully loaded dataset with {len(trials)} trials")
 
+        # Update app state with loaded data
         for key, value in info.items():
-            setattr(self, key, value)
+            if hasattr(self.app_state, key):
+                setattr(self.app_state, key, value)
             print(f"Loaded {key}: {value}")
-        
-            if key == "cameras":
-                self.cameras = value
 
+        self.app_state.available_variables = available_variables
 
-            if key == "mics":
-                self.mics = value
-
-            
-            if key == "trial_condition":
-                self.trial_condition_keys = [None] + value
-
-                
-
-        if (self.current_trial and # check if current trial is available from last time (.yaml)
-            self.current_trial in self.trials): # check if it is valid
-            self.trial_combo.setCurrentText(str(self.current_trial)) # set trial
-        elif self.trials:
-            # Default to first value
-            self.current_trial = self.trials[0]
-
-            
-        # Same logic for other variables:
-        if self.keypoints:
-            if (self.current_keypoint and 
-                self.current_keypoint in self.keypoints):
-                self.keypoint_combo.setCurrentText(self.current_keypoint)
-            else:
-                self.current_keypoint = self.keypoints[0]
-
-        if (self.current_variable and 
-            self.current_variable in self.available_variables):
-            self.variable_combo.setCurrentText(self.current_variable)
-        elif self.available_variables:
-            self.current_variable = self.available_variables[0]
-        else:
-            raise ValueError("No feature variables found. Please specify one. E.g. ds['pos'].attrs['type'] = 'feature'")
-        
-
-        if (self.current_color_variable and 
-            self.current_color_variable in self.color_variables):
-            self.color_variable_combo.setCurrentText(self.current_color_variable)
-
-
-        if (self.current_trial_condition_key and 
-            self.current_trial_condition_key in self.trial_condition_keys):
-            self.trial_condition_key_combo.setCurrentText(self.current_trial_condition_key)
-        elif self.trial_condition_keys:
-            self.current_trial_condition_key = self.trial_condition_keys[0]
+        # Set current selections from previous state or defaults using helper method
+        self._restore_or_set_default_selections()
 
         # Initialize trial condition system
-        if hasattr(self, 'current_trial_condition_key') and self.current_trial_condition_key:
+        if self.app_state.current_trial_condition_key:
             self._update_trial_condition_values()
 
-        if hasattr(self, 'fps_playback'):
-            self.fps_playback_edit.setText(str(self.fps_playback))
-        if hasattr(self, "fps_playback"):
-            self.fps_playback = getattr(self, "fps_playback")
-        else:
-            self.fps_playback = 30
-  
+        # Set FPS from app state
+        self.fps_playback_edit.setText(str(self.app_state.fps_playback))
 
         self._update_dropdown()
-    
 
-
-        # Only start do plotting after these are enabled
+        # Only start plotting after controls are enabled
         self._set_trial_controls_enabled(True)
 
         self._update_plot()
         self._update_video()
 
+    def _restore_or_set_default_selections(self):
+        """Restore saved selections from app_state or set defaults from available options."""
 
+        # Configuration for each selection: (current_attr, available_attr, combo_widget)
+        selection_configs = [
+            ("current_trial", "trials", self.trial_combo, False),
+            ("current_keypoint", "keypoints", self.keypoint_combo, False),
+            (
+                "current_variable",
+                "available_variables",
+                self.variable_combo,
+            ),
+            (
+                "current_color_variable",
+                "color_variables",
+                self.color_variable_combo,
+            ),
+            (
+                "current_trial_condition_key",
+                "trial_condition_keys",
+                self.trial_condition_key_combo,
+            ),
+        ]
+
+        for (
+            current_attr,
+            available_attr,
+            combo_widget,
+        ) in selection_configs:
+            current_value = getattr(self.app_state, current_attr)
+            available_values = getattr(self.app_state, available_attr)
+
+            if available_values:  # Only proceed if there are available options
+                if current_value and current_value in available_values:
+                    # Restore saved selection if it's still valid
+                    combo_widget.setCurrentText(str(current_value))
+                else:
+                    # Set to first available option as default
+                    setattr(self.app_state, current_attr, available_values[0])
+                    combo_widget.setCurrentText(str(available_values[0]))
+
+            # Current variable is required.
+            elif current_attr == "current_variable":
+                show_error(
+                    "No feature variables found. Please specify one. E.g. ds['pos'].attrs['type'] = 'feature'"
+                )
 
     def _update_dropdown(self):
         """Update all dropdown contents."""
-        
+
         self.trial_combo.clear()
-        self.trial_combo.addItems([str(trial) for trial in self.trials])
+        self.trial_combo.addItems([str(trial) for trial in self.app_state.trials])
 
         self.keypoint_combo.clear()
-        self.keypoint_combo.addItems(self.keypoints)
-        self.keypoint_combo.setEnabled(bool(self.keypoints))
+        self.keypoint_combo.addItems(self.app_state.keypoints)
+        self.keypoint_combo.setEnabled(bool(self.app_state.keypoints))
 
         self.variable_combo.clear()
-        self.variable_combo.addItems(self.available_variables)
+        self.variable_combo.addItems(self.app_state.available_variables)
 
         self.color_variable_combo.clear()
         self.color_variable_combo.addItem("None")
-        self.color_variable_combo.addItems(self.color_variables)
+        self.color_variable_combo.addItems(self.app_state.color_variables)
 
         self.trial_condition_key_combo.clear()
-        self.trial_condition_key_combo.addItems(self.trial_condition_keys)
+        self.trial_condition_key_combo.addItems(self.app_state.trial_condition_keys)
 
         self.trial_condition_value_combo.clear()
         self.trial_condition_value_combo.addItem("None")
 
-        if hasattr(self, "current_trial_condition_key") and self.current_trial_condition_key and hasattr(self, "ds") and self.current_trial_condition_key in self.ds.coords:
-            unique_values = np.unique(self.ds.coords[self.current_trial_condition_key].values)
-            self.trial_condition_value_combo.addItems([str(int(val)) for val in np.sort(unique_values)])
+        if (
+            self.app_state.current_trial_condition_key
+            and self.app_state.current_trial_condition_key in self.app_state.ds.coords
+        ):
+            unique_values = np.unique(
+                self.app_state.ds.coords[self.app_state.current_trial_condition_key].values
+            )
+            self.trial_condition_value_combo.addItems(
+                [str(int(val)) for val in np.sort(unique_values)]
+            )
 
         self.camera_combo.clear()
-        self.camera_combo.addItems(getattr(self, "cameras", []))
+        self.camera_combo.addItems(self.app_state.cameras)
 
         self.mic_combo.clear()
-        self.mic_combo.addItems(getattr(self, "mics", []))
+        self.mic_combo.addItems(self.app_state.mics)
 
-    
     def _set_trial_controls_enabled(self, enabled: bool):
         """Enable or disable all buttons."""
         buttons = [
@@ -405,21 +376,17 @@ class DataWidget(QWidget):
         for combo in buttons:
             combo.setEnabled(enabled)
 
-        if enabled:
-            self.ready = True
+        self.app_state.ready = enabled
 
-    
     def _on_trial_changed(self, trial_text: str):
         """Handle trial selection change from UI."""
         try:
-            self.current_trial = int(trial_text)
-            State.set("current_trial", int(trial_text))
+            self.app_state.current_trial = int(trial_text)
         except ValueError:
             return
-        
+
         self._update_video()
         self._update_plot()
-        
 
     def next_trial(self):
         """Go to the next trial. Can be called by shortcut."""
@@ -444,91 +411,86 @@ class DataWidget(QWidget):
 
     def _navigate_trial(self, direction: int) -> bool:
         """Navigate to next/previous trial."""
-        if self.current_trial is None or not self.trials:
+        if self.app_state.current_trial is None or not self.app_state.trials:
             return False
         try:
-            idx = self.trials.index(self.current_trial) + direction
+            idx = self.app_state.trials.index(self.app_state.current_trial) + direction
 
-            if 0 <= idx < len(self.trials):
-                self.current_trial = self.trials[idx]
+            if 0 <= idx < len(self.app_state.trials):
+                self.app_state.current_trial = self.app_state.trials[idx]
                 # Update the combo box text without triggering the signal
                 self.trial_combo.blockSignals(True)
-                self.trial_combo.setCurrentText(str(self.current_trial))
+                self.trial_combo.setCurrentText(str(self.app_state.current_trial))
                 self.trial_combo.blockSignals(False)
                 return True
         except ValueError:
             pass
         return False
 
-
     def _on_camera_changed(self, camera: str):
         """Handle camera selection change from UI."""
-        self.current_camera = camera
+        self.app_state.current_camera = camera
         self._update_video()
 
-
     def _on_mic_changed(self, mic: str):
-        """Handle microphone selection change from UI.
-        """
-        self.current_mic = mic
+        """Handle microphone selection change from UI."""
+        self.app_state.current_mic = mic
         # TODO: Implement audio update logic here if/when needed.
-        pass
 
     def _on_fps_changed(self):
         """Handle playback FPS change from UI."""
         fps = int(self.fps_playback_edit.text())
-        self.fps_playback = fps
-        State.set("fps_playback", fps)
-
-
+        self.app_state.fps_playback = fps
 
     def _on_keypoint_changed(self, keypoint: str):
         """Handle keypoint selection change from UI."""
-        self.current_keypoint = keypoint
-        State.set("current_keypoint", keypoint)
+        self.app_state.current_keypoint = keypoint
         self._update_plot()
-
 
     def _on_variable_changed(self, variable: str):
         """Handle variable selection change from UI."""
-        self.current_variable = variable
+        self.app_state.current_variable = variable
         self._update_plot()
-
 
     def _on_color_variable_changed(self, color_variable: str):
         """Handle color variable selection change from UI."""
         if color_variable == "None":
-            self.current_color_variable = None
+            self.app_state.current_color_variable = None
         else:
-            self.current_color_variable = color_variable
+            self.app_state.current_color_variable = color_variable
         self._update_plot()
-
 
     def _on_trial_condition_key_changed(self, condition_key: str):
         """Handle trial condition key selection change from UI."""
-        self.current_trial_condition_key = condition_key if condition_key else None
+        self.app_state.current_trial_condition_key = condition_key if condition_key else None
         self._update_trial_condition_values()
-  
-        
+
     def _update_trial_condition_values(self):
         """Update the trial condition value dropdown based on selected key."""
         self.trial_condition_value_combo.blockSignals(True)
         self.trial_condition_value_combo.clear()
         self.trial_condition_value_combo.addItem("None")  # Default option
 
-        if self.current_trial_condition_key and self.current_trial_condition_key in self.ds.coords:
+        if (
+            self.app_state.current_trial_condition_key
+            and self.app_state.current_trial_condition_key in self.app_state.ds.coords
+        ):
             # Get unique values for the selected condition key
-            unique_values = np.unique(self.ds.coords[self.current_trial_condition_key].values)
-            self.trial_condition_value_combo.addItems([str(int(val)) for val in np.sort(unique_values)])
+            unique_values = np.unique(
+                self.app_state.ds.coords[self.app_state.current_trial_condition_key].values
+            )
+            self.trial_condition_value_combo.addItems(
+                [str(int(val)) for val in np.sort(unique_values)]
+            )
 
         self.trial_condition_value_combo.blockSignals(False)
 
     def _on_trial_condition_value_changed(self, condition_value: str):
         """Handle trial condition value selection change from UI."""
         if condition_value == "None":
-            self.current_trial_condition_value = None
+            self.app_state.current_trial_condition_value = None
         else:
-            self.current_trial_condition_value = condition_value
+            self.app_state.current_trial_condition_value = condition_value
 
         # Block signals to prevent unnecessary updates during filtering
         self.trial_combo.blockSignals(True)
@@ -536,45 +498,39 @@ class DataWidget(QWidget):
         self.trial_combo.blockSignals(False)
         self._update_plot()
 
-
-
     def _update_filtered_trials(self):
         """Update the available trials based on condition filtering."""
 
-            
-        # Get all trials
-        all_trials = self.ds.coords['trial'].values.tolist()
+        coord_key = self.app_state.current_trial_condition_key
+        coord_value = self.app_state.current_trial_condition_value
 
-        coord_key = self.current_trial_condition_key
-        coord_value = self.current_trial_condition_value
-
-
-        if (coord_key and coord_value and coord_value != "None"):
+        if coord_key and coord_value and coord_value != "None":
             # Filter trials based on condition
-            ds = self.ds.copy(deep=True)
-            self.trials = ds.trial.where(ds[coord_key] == int(coord_value), drop=True).values
-
+            ds = self.app_state.ds.copy(deep=True)
+            filtered_trials = ds.trial.where(ds[coord_key] == int(coord_value), drop=True).values
+            self.app_state.trials = list(filtered_trials)
         else:
             return
-        
 
         # Update trials dropdown
         self.trial_combo.clear()
-        self.trial_combo.addItems([str(int(trial)) for trial in self.trials])
+        self.trial_combo.addItems([str(int(trial)) for trial in self.app_state.trials])
 
-        if self.current_trial not in self.trials:
-            self.current_trial = int(self.trials[0])
-            self.trial_combo.setCurrentText(str(self.current_trial))
-
+        if self.app_state.current_trial not in self.app_state.trials:
+            self.app_state.current_trial = int(self.app_state.trials[0])
+            self.trial_combo.setCurrentText(str(self.app_state.current_trial))
 
     def _update_video(self):
-        if not self.ready:
-            return     
-    
-        try:    
-            file_name = self.ds[self.camera_combo.currentText()].sel(trial=self.current_trial).values.item()
-            video_path = os.path.join(self.video_folder, file_name)
-            
+        if not self.app_state.ready:
+            return
+
+        try:
+            file_name = (
+                self.app_state.ds[self.camera_combo.currentText()]
+                .sel(trial=self.app_state.current_trial)
+                .values.item()
+            )
+            video_path = os.path.join(self.app_state.video_folder, file_name)
 
             # Remove existing video-like layers
             layers_to_remove = []
@@ -588,110 +544,36 @@ class DataWidget(QWidget):
             video_layer = self.viewer.open(video_path)
             if isinstance(video_layer, list) and video_layer:
                 video_layer = video_layer[0]
-            if hasattr(video_layer, 'name'):
+            if hasattr(video_layer, "name"):
                 video_layer.name = "video"
-        except Exception as e:
+        except (OSError, AttributeError, ValueError) as e:
             print(f"Error loading video: {e}")
-
-
-
-
-
 
     def _update_plot(self):
         """Update the line plot with current trial/keypoint/variable selection."""
-        if not self.ready:
-            return            
-        
+        if not self.app_state.ready:
+            return
+
         try:
             print("1")
             self.LinePlot.updateLinePlot(
-                self.ds, 
-                self.current_trial, 
-                self.current_keypoint, 
-                self.current_variable, 
-                self.current_color_variable
+                self.app_state.ds,
+                self.app_state.current_trial,
+                self.app_state.current_keypoint,
+                self.app_state.current_variable,
+                self.app_state.current_color_variable,
             )
 
             print("2")
-            time_data = self.ds.sel(trial=self.current_trial, keypoints=self.current_keypoint).time.values
-            labels = self.ds.sel(trial=self.current_trial, keypoints=self.current_keypoint).labels.values
+            time_data = self.app_state.ds.sel(
+                trial=self.app_state.current_trial,
+                keypoints=self.app_state.current_keypoint,
+            ).time.values
+            labels = self.app_state.ds.sel(
+                trial=self.app_state.current_trial,
+                keypoints=self.app_state.current_keypoint,
+            ).labels.values
             self.labels_widget.plot_all_motifs(time_data, labels)
 
-
-                
-        except Exception as e:
+        except (KeyError, AttributeError, ValueError) as e:
             print(f"Error updating plot: {e}")
-    
-
-
-
-#     def _auto_save_state(self):
-#         """Auto-save state every 10 seconds."""
-#         # Check if yaml_path exists
-#         if not hasattr(self, 'yaml_path'):
-#             print("Error: yaml_path not set, cannot auto-save")
-#             return
-            
-#         save_state = {}
-#         save_state.update(self.save_object_attributes(self))
-
-#         if hasattr(self, 'plots_widget') and self.plots_widget is not None:
-#             save_state.update(self.save_object_attributes(self.plots_widget))
-#         self._save_state_as_file(save_state)
-
-
-#     # Before closing, store current state for some self.attributes
-#     def closeEvent(self, event):
-#         """Handle close event by stopping the timer and saving state one final time."""
-#         # Stop the auto-save timer
-#         if hasattr(self, 'save_timer'):
-#             self.save_timer.stop()
-        
-#         # Save state one final time
-#         save_state = {}
-#         save_state.update(self.save_object_attributes(self))
-#         if hasattr(self, 'plots_widget') and self.plots_widget is not None:
-#             save_state.update(self.save_object_attributes(self.plots_widget))
-#         self._save_state_as_file(save_state)
-#         super().closeEvent(event)
-
-#     def _save_state_as_file(self, save_state) -> None:
-#         try:
-#             with open(self.yaml_path, "w", encoding="utf-8") as f:
-#                 yaml.dump(save_state, f, default_flow_style=False, sort_keys=False)
-#         except Exception as e:
-#             print(f"Error saving state file: {e}")
-
-#     def save_object_attributes(self, obj: object, prefix: str = "") -> dict:
-#         """Return a dict of saveable attributes from an object."""
-#         attrs = {}
-
-
-        
-
-#         saveable_attrs = [
-#             # DataWidget attributes
-#             'yaml_path', 'file_path', 'video_folder', 'audio_folder', 'current_trial', 'current_keypoint', 'current_variable', 'current_color_variable',
-#             'current_trial_condition_key', 'current_trial_condition_value',
-#             'color_variables', 'cameras', 'mics', 'fps_playback',
-#             # PlotsWidget attributes
-#             'ymin', 'ymin', 'window_size'
-#         ]
-
-            
-#         for attr_name in saveable_attrs:
-#             if hasattr(obj, attr_name):
-#                 try:
-#                     value = getattr(obj, attr_name)
-#                     key = f"{prefix}{attr_name}" if prefix else attr_name
-#                     attrs[key] = value
-#                 except Exception:
-#                     continue
-
-
-#         return attrs
-
-
-
-# 4
