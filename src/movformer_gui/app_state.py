@@ -30,8 +30,13 @@ class AppState:
     # Plot settings (saved to YAML)
     ymin: float | None = None
     ymax: float | None = None
+    spec_ymin: float | None = None
+    spec_ymax: float | None = None
     window_size: float | None = None
     jump_size: float | None = None
+    audio_buffer: float | None = None
+    spec_buffer: float | None = None
+    plot_spectrogram: bool = False
 
     # UI state (NOT saved to YAML)
     ready: bool = False
@@ -51,8 +56,13 @@ class AppState:
             "fps_playback",
             "ymin",
             "ymax",
+            "spec_ymin",
+            "spec_ymax",
             "window_size",
-            "jump_size"
+            "jump_size",
+            "audio_buffer",
+            "spec_buffer",
+            "plot_spectrogram",
         }
         # Add any attributes ending with _sel
         sel_attrs = {attr for attr in self.__dict__ if attr.endswith("_sel")}
@@ -84,8 +94,12 @@ class ObservableAppState(QObject):
     # Plot settings signals
     ymin_changed = Signal(object)
     ymax_changed = Signal(object)
+    spec_ymin_changed = Signal(object)
+    spec_ymax_changed = Signal(object)
     window_size_changed = Signal(object)
     jump_size_changed = Signal(object)
+    audio_buffer_changed = Signal(object)
+    spec_buffer_changed = Signal(object)
 
     # UI state signals
     ready_changed = Signal(bool)
@@ -186,6 +200,30 @@ class ObservableAppState(QObject):
         self.ymax_changed.emit(value)
 
     @property
+    def spec_ymin(self):
+        return self._state.spec_ymin
+
+    @spec_ymin.setter
+    def spec_ymin(self, value):
+        # Convert numpy types to Python float
+        if value is not None:
+            value = float(value)
+        self._state.spec_ymin = value
+        self.spec_ymin_changed.emit(value)
+
+    @property
+    def spec_ymax(self):
+        return self._state.spec_ymax
+
+    @spec_ymax.setter
+    def spec_ymax(self, value):
+        # Convert numpy types to Python float
+        if value is not None:
+            value = float(value)
+        self._state.spec_ymax = value
+        self.spec_ymax_changed.emit(value)
+
+    @property
     def window_size(self):
         return self._state.window_size
 
@@ -208,6 +246,30 @@ class ObservableAppState(QObject):
             value = float(value)
         self._state.jump_size = value
         self.jump_size_changed.emit(value)
+
+    @property
+    def audio_buffer(self):
+        return self._state.audio_buffer
+
+    @audio_buffer.setter
+    def audio_buffer(self, value):
+        # Convert numpy types to Python float
+        if value is not None:
+            value = float(value)
+        self._state.audio_buffer = value
+        self.audio_buffer_changed.emit(value)
+
+    @property
+    def spec_buffer(self):
+        return self._state.spec_buffer
+
+    @spec_buffer.setter
+    def spec_buffer(self, value):
+        # Convert numpy types to Python float
+        if value is not None:
+            value = float(value)
+        self._state.spec_buffer = value
+        self.spec_buffer_changed.emit(value)
 
     # UI state properties
     @property

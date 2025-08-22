@@ -26,7 +26,7 @@ def main():
     
     import matplotlib
     matplotlib.set_loglevel("WARNING")
-    
+
     # Suppress Qt warnings at the OS level
     os.environ['QT_LOGGING_RULES'] = 'qt.*=false'
     

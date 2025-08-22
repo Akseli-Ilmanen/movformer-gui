@@ -59,6 +59,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         # Set up cross-references between widgets, so they can talk to each other
         self.plots_widget.set_lineplot(self.lineplot)
         self.plots_widget.set_labels_widget(self.labels_widget)
+        self.plots_widget.set_data_widget(self.data_widget)
         self.labels_widget.set_lineplot(self.lineplot)
         self.lineplot.set_plots_widget(self.plots_widget)
         self.data_widget.set_references(self.lineplot, self.labels_widget, self.plots_widget)

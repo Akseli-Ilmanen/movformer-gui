@@ -12,6 +12,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from qtpy.QtGui import QGuiApplication
+import yaml
+from pathlib import Path
 
 
 class ShortcutsWidget(QWidget):
@@ -90,15 +92,54 @@ class ShortcutsDialog(QDialog):
 
         layout.addWidget(self.shortcuts_table)
 
-        # Add close button
+        # Add buttons
         button_layout = QHBoxLayout()
+        
+        # Add Restore to Defaults button
+        restore_button = QPushButton("Restore to Defaults")
+        restore_button.clicked.connect(self._restore_to_defaults)
+        button_layout.addWidget(restore_button)
+        
+        button_layout.addStretch()
+        
+        # Add close button
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.close)
-        button_layout.addStretch()
         button_layout.addWidget(close_button)
-        button_layout.addStretch()
 
         layout.addLayout(button_layout)
+
+    def _restore_to_defaults(self):
+        """Restore YAML settings to defaults, keeping only audio_folder and video_folder."""
+        try:
+            # Get current YAML path from app state
+            yaml_path = self.app_state._yaml_path
+            
+            # Load current YAML to extract audio_folder and video_folder
+            current_settings = {}
+            if Path(yaml_path).exists():
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    current_settings = yaml.safe_load(f) or {}
+            
+            # Keep only audio_folder and video_folder
+            default_settings = {}
+            if 'audio_folder' in current_settings:
+                default_settings['audio_folder'] = current_settings['audio_folder']
+            if 'video_folder' in current_settings:
+                default_settings['video_folder'] = current_settings['video_folder']
+            
+            # Save minimal YAML
+            with open(yaml_path, 'w', encoding='utf-8') as f:
+                yaml.dump(default_settings, f, default_flow_style=False, sort_keys=False)
+            
+            # Reload app state from YAML
+            self.app_state.load_from_yaml(yaml_path)
+            
+            # Trigger plot update by emitting data_updated signal
+            self.app_state.data_updated.emit()
+            
+        except Exception as e:
+            print(f"Error restoring to defaults: {e}")
 
     def _populate_shortcuts_table(self):
         """Populate the shortcuts table with all available shortcuts."""

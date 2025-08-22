@@ -17,6 +17,8 @@ from qtpy.QtWidgets import (
     QApplication,
     QShortcut,
     QLabel,
+    QCheckBox,
+    QMessageBox,
 )
 from qtpy.QtGui import QKeySequence
 from qtpy.QtCore import Qt
@@ -56,6 +58,9 @@ class DataWidget(QWidget):
         # Dictionary to store all controls for enabling/disabling
         self.controls = []
 
+
+    
+
         # E.g. {keypoints = ["beakTip, StickTip"], trials=[1, 2, 3, 4], ...}
         self.type_vars_dict = {} # Gets filled by load_dataset
 
@@ -84,6 +89,28 @@ class DataWidget(QWidget):
         self.lineplot = lineplot
         self.labels_widget = labels_widget
         self.plots_widget = plots_widget
+        
+        # Connect to app state signals for buffer changes
+        self._connect_app_state_signals()
+
+    def _connect_app_state_signals(self):
+        """Connect to app state signals that should trigger spectrogram buffer clearing."""
+        if hasattr(self.app_state, 'spec_buffer_changed'):
+            self.app_state.spec_buffer_changed.connect(self._on_spec_buffer_changed)
+        if hasattr(self.app_state, 'audio_buffer_changed'):
+            self.app_state.audio_buffer_changed.connect(self._on_audio_buffer_changed)
+
+    def _on_spec_buffer_changed(self, value):
+        """Handle spectrogram buffer size change."""
+        # Clear spectrogram buffer when buffer size changes
+        if hasattr(self, 'lineplot') and self.lineplot is not None:
+            self.lineplot.clear_spectrogram_buffer()
+
+    def _on_audio_buffer_changed(self, value):
+        """Handle audio buffer size change."""
+        # Clear spectrogram buffer when audio buffer changes (affects audio loading)
+        if hasattr(self, 'lineplot') and self.lineplot is not None:
+            self.lineplot.clear_spectrogram_buffer()
 
 
     def _create_path_widget(self, label: str, object_name: str, browse_callback):
@@ -93,11 +120,13 @@ class DataWidget(QWidget):
         browse_button = QPushButton("Browse")
         browse_button.setObjectName(f"{object_name}_browse_button")
         browse_button.clicked.connect(browse_callback)
+        
 
         layout = QHBoxLayout()
         layout.addWidget(line_edit)
         layout.addWidget(browse_button)
         self.layout().addRow(label, layout)
+
         return line_edit
 
     def _create_path_folder_widgets(self):
@@ -117,6 +146,8 @@ class DataWidget(QWidget):
             object_name="audio_folder",
             browse_callback=lambda: self.on_browse_clicked("audio_file"), # folder, audio
         )
+
+
 
     def _create_load_button(self):
         """Create a button to load the file to the viewer."""
@@ -182,6 +213,7 @@ class DataWidget(QWidget):
         
 
 
+
         # Load ds
         file_path = self.file_path_edit.text()        
         self.app_state.ds, self.type_vars_dict = load_dataset(file_path)
@@ -196,6 +228,9 @@ class DataWidget(QWidget):
             audio_path = self.audio_folder_edit.text()
             if audio_path:
                 self.audio_player.load_audio_file(audio_path)
+                # Clear spectrogram buffer when new audio is loaded
+                if hasattr(self, 'lineplot') and self.lineplot is not None:
+                    self.lineplot.clear_spectrogram_buffer()
 
         self._restore_or_set_defaults()
 
@@ -209,6 +244,23 @@ class DataWidget(QWidget):
 
 
 
+        load_btn = self.findChild(QPushButton, "load_button")
+        load_btn.setEnabled(False)
+        load_btn.setText("Restart app to load new data")
+
+
+        self._remove_ugly()
+
+
+    def _remove_ugly(self):
+        """Function to execute after on_load_clicked has been called."""
+        # Simulate user expand/collapse so widget state and UI update as if user did it
+        self.meta_widget.collapsible_widgets[0].collapse()
+        QApplication.processEvents()
+        self.meta_widget.collapsible_widgets[0].expand()
+        QApplication.processEvents()
+
+  
 
     def _create_trial_controls(self):
         """Create all trial-related controls based on info configuration."""
@@ -236,6 +288,12 @@ class DataWidget(QWidget):
         # 3. Mics third
         if "mics" in self.type_vars_dict.keys():
             self._create_combo_widget("mics", self.type_vars_dict["mics"])
+        
+            # 4. Audio player fourth (Optional)
+            self.audio_player = AudioPlayer(self.viewer, app_state=self.app_state)
+            self.layout().addRow("Audio Player:", self.audio_player)
+            self._connect_video_audio()
+
         else:
             combo = QComboBox()
             combo.setObjectName("mics_combo")
@@ -243,12 +301,20 @@ class DataWidget(QWidget):
             combo.addItems(["None"])
             self.layout().addRow("Mics:", combo)
 
-        # 4. Single Audio player instance (optional)
+            self.audio_player = None
+        
+
+        # DELETE IN THE FUTURE; WHEN YOU CAN AUDIO PASSED VIA MICS
         self.audio_player = AudioPlayer(self.viewer, app_state=self.app_state)
         self.layout().addRow("Audio Player:", self.audio_player)
         self._connect_video_audio()
 
-
+        # Add spectrogram checkbox
+        self.plot_spec_checkbox = QCheckBox("Plot spectrogram")
+        self.plot_spec_checkbox.setChecked(bool(getattr(self.app_state, "plot_spectrogram", False)))
+        self.plot_spec_checkbox.stateChanged.connect(self._on_plot_spectrogram_changed)
+        self.layout().addRow(self.plot_spec_checkbox)
+        self.controls.append(self.plot_spec_checkbox)
 
         # 5. Add gap (empty row) for separation
         gap_label = QLabel("")
@@ -368,6 +434,12 @@ class DataWidget(QWidget):
             self.app_state.set_key_sel("trials", trial_value)
             self._update_plot()
             self._update_video()
+
+
+            # Clear spectrogram buffer when switching trials
+            if hasattr(self, 'lineplot') and self.lineplot is not None:
+                self.lineplot.clear_spectrogram_buffer()
+
         except ValueError:
             # Handle invalid integer conversion gracefully
             return
@@ -488,6 +560,10 @@ class DataWidget(QWidget):
             self.trials_combo.setCurrentText(str(new_trial))
             self.trials_combo.blockSignals(False)
 
+            # Clear spectrogram buffer when switching trials
+            if hasattr(self, 'lineplot') and self.lineplot is not None:
+                self.lineplot.clear_spectrogram_buffer()
+
             self._update_video()
             self._update_plot()  
 
@@ -525,6 +601,10 @@ class DataWidget(QWidget):
             return
 
         try:
+            # Give line plot access to audio player
+            if hasattr(self, "audio_player") and self.audio_player is not None:
+                setattr(self.lineplot, "audio_player", self.audio_player)
+
             self.lineplot.updateLinePlot()
 
             ds = self.app_state.ds
@@ -535,6 +615,16 @@ class DataWidget(QWidget):
 
         except (KeyError, AttributeError, ValueError) as e:
             show_error(f"Error updating plot: {e}")
+
+    def _on_plot_spectrogram_changed(self, _state=None):
+        """Handle spectrogram checkbox state change."""
+        self.app_state.plot_spectrogram = bool(self.plot_spec_checkbox.isChecked())
+        
+        # Clear spectrogram buffer when switching plot modes
+        if hasattr(self, 'lineplot') and self.lineplot is not None:
+            self.lineplot.clear_spectrogram_buffer()
+            
+        self._update_plot()
 
 
     def _connect_video_audio(self):

@@ -111,8 +111,8 @@ class AudioPlayer(QWidget):
         self._stop_playback()
         sr = self.audio_sr
 
-
-        block_duration = 60.0  # seconds
+        # Use configurable buffer size from app_state, default to 60.0 seconds
+        block_duration = getattr(self.app_state, 'audio_buffer', 60.0)
         start_sample = int(self.current_time * sr)
         end_sample = int(min(start_sample + block_duration * sr, self.audio_loader.frames))
         block = self.audio_loader[start_sample:end_sample]
