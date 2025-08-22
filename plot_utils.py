@@ -78,26 +78,23 @@ def plot_singledim(ax, time, data, color_data=None, changepoints=None):
 
     return ax
 
-def plot_ds_variable(ax, ds, variable, trial_num, keypoint=None, color_variable=None):
+def plot_ds_variable(ax, ds, ds_kwargs, variable, color_variable=None):
     """
     Plot a variable from ds for a given trial and keypoint.
     Handles both multi-dimensional (e.g., pos, vel) and single-dimensional (e.g., speed) variables.
+
+    e.g. ds_kwargs: {trials=20, keypoints="beakTip", individual="Freddy"}
 
     """
     # Use ds.sel for direct selection
     var = ds[variable]
     time = ds["time"].values
-    sel_kwargs = {"trial": trial_num}
-    has_keypoints = "keypoints" in var.dims
 
-    # In case user, does not specify keypoints
-    if has_keypoints:
-        sel_kwargs["keypoints"] = keypoint
-    data = var.sel(**sel_kwargs).values
+    data = var.sel(**ds_kwargs).values
 
     # (time, XX), e.g. (time, space)
     if data.ndim == 2:
-        XX_var = var.sel(**sel_kwargs).dims[-1]
+        XX_var = var.sel(**ds_kwargs).dims[-1]
         coord_labels = list(ds[XX_var].values)
         ax = plot_multidim(ax, time, data, coord_labels=coord_labels)
 
@@ -109,15 +106,12 @@ def plot_ds_variable(ax, ds, variable, trial_num, keypoint=None, color_variable=
         
         for v in ds.data_vars:
             if v == color_variable and ds.attrs["plotColors"] == variable:
-                if has_keypoints and "keypoints" in ds[v].dims:
-                    color_data = ds[v].sel(**sel_kwargs).values
+
+                color_data = ds[v].sel(**ds_kwargs).values
                 
         
-
-            
         if ds.attrs["plotChangepoints"] == variable:
-            if has_keypoints and "keypoints" in ds["changepoints"].dims:
-                changepoints = ds["changepoints"].sel(**sel_kwargs).values
+            changepoints = ds["changepoints"].sel(**ds_kwargs).values
 
         ax = plot_singledim(ax, time, data, color_data=color_data, changepoints=changepoints)
 
@@ -125,7 +119,7 @@ def plot_ds_variable(ax, ds, variable, trial_num, keypoint=None, color_variable=
         print(f"Variable '{variable}' not supported for plotting.")
 
 
-    boundary_events_raw = ds["boundary_events"].sel(trial=trial_num).values
+    boundary_events_raw = ds["boundary_events"].sel(trials=ds_kwargs["trials"]).values
     valid_events = boundary_events_raw[~np.isnan(boundary_events_raw)]
     eventsIdxs = valid_events.astype(int)
     eventsIdxs = eventsIdxs[(eventsIdxs >= 0) & (eventsIdxs < len(time))]
@@ -135,10 +129,7 @@ def plot_ds_variable(ax, ds, variable, trial_num, keypoint=None, color_variable=
 
 
     ylabel = var.attrs.get("ylabel", variable)
-    if has_keypoints and keypoint is not None:
-        title = f"{variable} - trial {trial_num} - {keypoint}"
-    else:
-        title = f"{variable} - trial {trial_num}"
+    title = ", ".join([f"{k}={v}" for k, v in ds_kwargs.items()])
     ax.set_xlabel("Time (s)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)

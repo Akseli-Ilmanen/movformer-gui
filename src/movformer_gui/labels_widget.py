@@ -23,20 +23,17 @@ from qtpy.QtWidgets import (
 
 from file_utils import load_motif_mapping
 from label_utils import snap_to_nearest_changepoint
-from movformer_gui.app_state import ObservableAppState
 
 
 class LabelsWidget(QWidget):
     """Widget for labeling movement motifs in time series data."""
 
-    def __init__(self, napari_viewer: Viewer, lineplot=None, parent=None, app_state=None):
+    def __init__(self, napari_viewer: Viewer, app_state, parent=None):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
-        self.lineplot = lineplot  # Store reference to shared LinePlot
+        self.app_state = app_state
+        self.lineplot = None  # Will be set after creation
         self.data_widget = None  # Will be set via set_data_widget()
-
-        # Use provided app_state or create new one
-        self.app_state = app_state if app_state else ObservableAppState()
 
         # Make widget focusable for keyboard events
         self.setFocusPolicy(Qt.StrongFocus)
@@ -56,8 +53,7 @@ class LabelsWidget(QWidget):
         self.current_motif_pos: list[int] | None = None  # [start, end] idx of selected motif
         self.current_motif_id: int | None = None  # ID of currently selected motif
 
-        # Playback control
-        self.is_playing = False
+
 
         # UI components
         self.motifs_table = None
@@ -67,8 +63,9 @@ class LabelsWidget(QWidget):
         self.motif_mappings = load_motif_mapping(path)
         self._populate_motifs_table()
 
-        # Connect plot click if lineplot is available
-
+    def set_lineplot(self, lineplot):
+        """Set the lineplot reference and connect click handler."""
+        self.lineplot = lineplot
         self.lineplot.canvas.mpl_connect("button_press_event", self._on_plot_clicked)
 
     def plot_all_motifs(self, time_data=None, labels=None):
@@ -77,7 +74,7 @@ class LabelsWidget(QWidget):
         This implements state-based plotting similar to the MATLAB plot_motifs() function.
         It clears all existing motif rectangles and redraws them based on the current labels.
         """
-        if labels is None:
+        if labels is None or self.lineplot is None:
             return
 
         ax = self.lineplot.ax
@@ -139,7 +136,8 @@ class LabelsWidget(QWidget):
                     ylim,
                 )
 
-            self.lineplot.canvas.draw()
+            if self.lineplot is not None:
+                self.lineplot.canvas.draw()
 
         except (KeyError, IndexError, AttributeError) as e:
             print(f"Error plotting motifs: {e}")
@@ -301,10 +299,8 @@ class LabelsWidget(QWidget):
             return
 
         # Get current data from app_state
-        labels = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        ).labels.values
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
 
         if event.button == 1 and not self.ready_for_click:
             # Select motif -> Then can delete or edit.
@@ -366,10 +362,8 @@ class LabelsWidget(QWidget):
         if "changepoints" not in self.app_state.ds:
             return x_clicked_idx
 
-        changepoints_data = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        )["changepoints"].values
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        changepoints_data = self.app_state.ds.sel(**ds_kwargs)["changepoints"].values
 
         if changepoints_data is None or not np.array_equal(
             changepoints_data, changepoints_data.astype(bool)
@@ -377,10 +371,7 @@ class LabelsWidget(QWidget):
             return x_clicked_idx
 
         # Get changepoints for current trial and keypoint
-        changepoints_data = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        )["changepoints"].values
+        changepoints_data = self.app_state.ds.sel(**ds_kwargs)["changepoints"].values
 
         # Find changepoint times
         changepoint_indices = np.where(changepoints_data)[0]
@@ -396,10 +387,8 @@ class LabelsWidget(QWidget):
             return
 
         # Get current labels from app_state
-        labels = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        ).labels.values
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
 
         start_idx = self.first_click
         end_idx = self.second_click
@@ -417,18 +406,10 @@ class LabelsWidget(QWidget):
         self.ready_for_click = False
 
         # Save updated labels back to dataset
-        self.app_state.ds["labels"].loc[
-            {
-                "trial": self.app_state.current_trial,
-                "keypoints": self.app_state.current_keypoint,
-            }
-        ] = labels
+        self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
         # Update plot
-        time_data = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        ).time.values
+        time_data = self.app_state.ds.sel(**ds_kwargs).time.values
         self.plot_all_motifs(time_data, labels)
 
     def _delete_motif(self):
@@ -439,10 +420,8 @@ class LabelsWidget(QWidget):
         start, end = self.current_motif_pos
 
         # Get current labels from app_state
-        labels = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        ).labels.values
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
 
         # Clear labels in the selected range (set to 0)
         labels[start : end + 1] = 0
@@ -452,18 +431,10 @@ class LabelsWidget(QWidget):
         self.current_motif_id = None
 
         # Save updated labels back to dataset
-        self.app_state.ds["labels"].loc[
-            {
-                "trial": self.app_state.current_trial,
-                "keypoints": self.app_state.current_keypoint,
-            }
-        ] = labels
+        self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
         # Update plot
-        time_data = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        ).time.values
+        time_data = self.app_state.ds.sel(**ds_kwargs).time.values
         self.plot_all_motifs(time_data, labels)
 
     def _edit_motif(self):
@@ -475,10 +446,8 @@ class LabelsWidget(QWidget):
         old_start, old_end = self.current_motif_pos
 
         # Get current labels from app_state
-        labels = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        ).labels.values
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
 
         # Clear labels in the selected range (set to 0)
         labels[old_start : old_end + 1] = 0
@@ -491,18 +460,10 @@ class LabelsWidget(QWidget):
         self.current_motif_id = None
 
         # Save updated labels back to dataset
-        self.app_state.ds["labels"].loc[
-            {
-                "trial": self.app_state.current_trial,
-                "keypoints": self.app_state.current_keypoint,
-            }
-        ] = labels
+        self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
         # Update plot
-        time_data = self.app_state.ds.sel(
-            trial=self.app_state.current_trial,
-            keypoints=self.app_state.current_keypoint,
-        ).time.values
+        time_data = self.app_state.ds.sel(**ds_kwargs).time.values
         self.plot_all_motifs(time_data, labels)
 
     def _set_frame(self, frame_idx: int) -> bool:
@@ -514,45 +475,30 @@ class LabelsWidget(QWidget):
         """Play a segment of the video between start and end times using the viewer.
         Can be interrupted by calling this method again.
         """
+     
+
+        qt_dims = self.viewer.window._qt_viewer.dims
+
+        # Toggle behavior: if already playing, stop
         try:
-
-            # If already playing, stop the current playback
-            if self.is_playing:
-                self.is_playing = False
-                return False
-
-            # Check if we have a valid motif position
-            if not self.current_motif_pos:
-                return False
-
-            # Get start and end times from current motif position
-            start_frame = self.current_motif_pos[0]
-            end_frame = self.current_motif_pos[1]
-
-            if start_frame >= end_frame:
-                return False
-
-            # Set playback flag (can be used to interrupt previous playback)
-            self.is_playing = True
-
-            fps_value = self.fps_playback if self.fps_playback is not None else 30
-            frame_interval = 1.0 / max(int(fps_value), 1)
-            self._set_frame(start_frame)
-
-            for frame in range(start_frame, end_frame + 1):
-                # Check if playback was interrupted
-                if not self.is_playing:
-                    return False
-
-                self._set_frame(frame)
-                if QApplication is not None:
-                    QApplication.processEvents()
-                _time.sleep(frame_interval)
-
-            self.is_playing = False
-            return True
-
-        except (AttributeError, ValueError, RuntimeError) as e:
-            self.is_playing = False
-            print(f"Error playing segment: {e}")
+            is_playing = not qt_dims._animation_thread._waiter.is_set()
+        except RuntimeError:
+            is_playing = False
+        
+        if is_playing:
+            qt_dims.stop()
             return False
+
+        # Validate selection
+        if not self.current_motif_pos:
+            return False
+
+        start_frame, end_frame = self.current_motif_pos[0], self.current_motif_pos[1]
+        if start_frame >= end_frame:
+            return False
+
+        # Start playback of the selected interval
+        fps_value = self.app_state.fps_playback if self.app_state.fps_playback is not None else 30
+        self._set_frame(start_frame)
+        qt_dims.play(axis=0, fps=float(fps_value), loop_mode="once", frame_range=(int(start_frame), int(end_frame)))
+        return True

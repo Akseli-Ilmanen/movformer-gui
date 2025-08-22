@@ -11,16 +11,49 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qtpy.QtGui import QGuiApplication
+
+
+class ShortcutsWidget(QWidget):
+    """Clickable widget that opens the shortcuts dialog when clicked."""
+    
+    def __init__(self, app_state, parent=None):
+        super().__init__(parent=parent)
+        self.app_state = app_state
+        self.shortcuts_dialog = None
+        
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        # Add a button to open the shortcuts dialog
+        self.open_button = QPushButton("Open Keyboard & Mouse Shortcuts")
+        self.open_button.clicked.connect(self.show_shortcuts_dialog)
+        layout.addWidget(self.open_button)
+    
+    def show_shortcuts_dialog(self):
+        """Show the shortcuts dialog."""
+        if self.shortcuts_dialog is None:
+            self.shortcuts_dialog = ShortcutsDialog(self.app_state, self)
+        self.shortcuts_dialog.show()
+        self.shortcuts_dialog.raise_()
+        self.shortcuts_dialog.activateWindow()
 
 
 class ShortcutsDialog(QDialog):
     """Dialog displaying all available keyboard and mouse shortcuts in a table."""
 
-    def __init__(self, parent=None):
+    def __init__(self, app_state, parent=None):
         super().__init__(parent=parent)
+        self.app_state = app_state
         self.setWindowTitle("Keyboard & Mouse Shortcuts")
         self.setModal(False)  # Allow interaction with napari while open
-        self.resize(800, 600)  # Large size to span across napari
+        # Size dialog within available screen geometry
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(800, available.width())
+            height = min(600, available.height())
+            self.resize(width, height)
         self._setup_ui()
         self._populate_shortcuts_table()
 
@@ -71,9 +104,19 @@ class ShortcutsDialog(QDialog):
         """Populate the shortcuts table with all available shortcuts."""
         shortcuts_data = [
             # Navigation
+            ("Ctrl + Alt + P", "Navigation", "Play/pause video (napari default)"),
             ("M", "Navigation", "Go to next trial"),
             ("N", "Navigation", "Go to previous trial"),
-            ("Ctrl+Alt+P", "Navigation", "Play/pause video (napari built-in)"),
+            ("", "", ""),  # Empty row for spacing
+            # Plot Navigation
+            ("↑", "Plot Navigation", "Shift Y-axis range up by 5% of current range"),
+            ("↓", "Plot Navigation", "Shift Y-axis range down by 5% of current range"),
+            ("←", "Plot Navigation", "Jump plot view left by configured jump size (in seconds)"),
+            ("→", "Plot Navigation", "Jump plot view right by configured jump size (in seconds)"),
+            ("Shift+↑", "Plot Navigation", "Increase Y-axis upper and lower limits by 5% of current range (zoom out vertically)"),
+            ("Shift+↓", "Plot Navigation", "Decrease Y-axis upper and lower limits by 5% of current range (zoom in vertically)"),
+            ("Shift+←", "Plot Navigation", "Make window size 20% smaller (zoom in horizontally)"),
+            ("Shift+→", "Plot Navigation", "Make window size 20% larger (zoom out horizontally)"),
             ("", "", ""),  # Empty row for spacing
             # Motif Labeling
             (
@@ -193,86 +236,3 @@ class ShortcutsDialog(QDialog):
         self.shortcuts_table.resizeRowsToContents()
 
 
-class ShortcutsWidget(QWidget):
-    """Widget that provides a button to show the shortcuts dialog."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
-        self.dialog = None
-        self._setup_ui()
-
-    def _setup_ui(self):
-        """Set up the user interface."""
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        # Create button to show shortcuts
-        show_button = QPushButton("Show All Shortcuts")
-        show_button.clicked.connect(self.show_shortcuts)
-        layout.addWidget(show_button)
-
-    def show_shortcuts(self):
-        """Show the shortcuts dialog."""
-        if self.dialog is None:
-            self.dialog = ShortcutsDialog(parent=self.parent())
-        self.dialog.show()
-        self.dialog.raise_()
-        self.dialog.activateWindow()
-
-    def _populate_shortcuts_table(self):
-        """Populate the shortcuts table with all available shortcuts."""
-        shortcuts_data = [
-            # Navigation
-            ("", "Navigation", ""),
-            ("M", "Navigation", "Go to next trial"),
-            ("N", "Navigation", "Go to previous trial"),
-            ("Ctrl+Alt+P", "Navigation", "Play/pause video (napari built-in)"),
-            # Motif Shortcuting - Numbers
-            ("1", "Motif Shortcut", "Motif 1"),
-            ("2", "Motif Shortcut", "Motif 2"),
-            ("3", "Motif Shortcut", "Motif 3"),
-            ("4", "Motif Shortcut", "Motif 4"),
-            ("5", "Motif Shortcut", "Motif 5"),
-            ("6", "Motif Shortcut", "Motif 6"),
-            ("7", "Motif Shortcut", "Motif 7"),
-            ("8", "Motif Shortcut", "Motif 8"),
-            ("9", "Motif Shortcut", "Motif 9"),
-            ("0", "Motif Shortcut", "Motif 10"),
-            # Motif Shortcuting - Letters
-            ("Q", "Motif Shortcut", "Motif 11"),
-            ("W", "Motif Shortcut", "Motif 12"),
-            ("R", "Motif Shortcut", "Motif 13"),
-            ("T", "Motif Shortcut", "Motif 14"),
-            # Mouse Controls
-            ("", "Mouse", ""),  # Empty row for spacing
-            (
-                "Left Click",
-                "Mouse",
-                "(After motif shortcut button), click 2x to select start/end for new motif",
-            ),
-            (
-                "Left Click",
-                "Mouse",
-                "Click on motif, then 'D' for delete or 'E + LeftClick + LeftClick' for edit",
-            ),
-            ("Right Click", "Mouse", "Play motif segment at cursor position"),
-            ("Right Click×2", "Mouse", "Interrupt current video playback"),
-            # Motif Operations
-            ("E", "Motif Edit", "Edit selected motif boundaries"),
-            ("D", "Motif Edit", "Delete selected motif"),
-        ]
-
-        self.shortcuts_table.setRowCount(len(shortcuts_data))
-
-        for row, (shortcut, category, description) in enumerate(shortcuts_data):
-            # Shortcut column
-            shortcut_item = QTableWidgetItem(shortcut)
-            self.shortcuts_table.setItem(row, 0, shortcut_item)
-
-            # Category column
-            category_item = QTableWidgetItem(category)
-            self.shortcuts_table.setItem(row, 1, category_item)
-
-            # Description column
-            description_item = QTableWidgetItem(description)
-            self.shortcuts_table.setItem(row, 2, description_item)

@@ -1,8 +1,7 @@
 """Widget for selecting start/stop times and playing a segment in napari."""
-
 import os
-
 import numpy as np
+from napari.utils.events import Event
 from napari.utils.notifications import show_error
 from napari.viewer import Viewer
 from qtpy.QtWidgets import (
@@ -10,18 +9,25 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QVBoxLayout,
     QLineEdit,
     QPushButton,
     QWidget,
+    QSizePolicy,
+    QApplication,
+    QShortcut,
+    QLabel,
 )
+from qtpy.QtGui import QKeySequence
+from qtpy.QtCore import Qt
 
-from movformer_gui.app_state import ObservableAppState
+
 from movformer_gui.data_loader import (
-    AUDIO_EXTENSIONS,
     VIDEO_EXTENSIONS,
     load_dataset,
     validate_media_folder,
 )
+from movformer_gui.audio_player import AudioPlayer
 
 
 class DataWidget(QWidget):
@@ -30,25 +36,32 @@ class DataWidget(QWidget):
     def __init__(
         self,
         napari_viewer: Viewer,
-        lineplot=None,
+        app_state,
+        meta_widget,
         parent=None,
-        labels_widget=None,
-        plots_widget=None,
-        app_state=None,
     ):
         super().__init__(parent=parent)
+        self.parent = parent
         self.viewer = napari_viewer
         self.setLayout(QFormLayout())
-        self.LinePlot = lineplot  # Use the shared LinePlot instance
-        self.labels_widget = labels_widget
-        self.plots_widget = plots_widget
+        self.app_state = app_state
+        self.meta_widget = meta_widget
+        self.lineplot = None  # Will be set after creation
+        self.labels_widget = None  # Will be set after creation
+        self.plots_widget = None  # Will be set after creation
+        self.audio_player = None  # Audio player widget
 
-        # Use provided app_state (should always be provided by meta_widget)
-        self.app_state = app_state if app_state else ObservableAppState()
+        # Dictionary to store all combo boxes
+        self.combos = {}
+        # Dictionary to store all controls for enabling/disabling
+        self.controls = []
 
-        self.create_path_folder_widgets()
+        # E.g. {keypoints = ["beakTip, StickTip"], trials=[1, 2, 3, 4], ...}
+        self.type_vars_dict = {} # Gets filled by load_dataset
+
+        self._create_path_folder_widgets()
         self._create_load_button()
-        self._create_trial_controls()
+
 
         # Restore UI text fields from app state
         if self.app_state.file_path:
@@ -57,6 +70,21 @@ class DataWidget(QWidget):
             self.video_folder_edit.setText(self.app_state.video_folder)
         if self.app_state.audio_folder:
             self.audio_folder_edit.setText(self.app_state.audio_folder)
+
+
+
+
+        
+
+
+
+
+    def set_references(self, lineplot, labels_widget, plots_widget):
+        """Set references to other widgets after creation."""
+        self.lineplot = lineplot
+        self.labels_widget = labels_widget
+        self.plots_widget = plots_widget
+
 
     def _create_path_widget(self, label: str, object_name: str, browse_callback):
         """Generalized function to create a line edit and browse button for file/folder paths."""
@@ -72,7 +100,7 @@ class DataWidget(QWidget):
         self.layout().addRow(label, layout)
         return line_edit
 
-    def create_path_folder_widgets(self):
+    def _create_path_folder_widgets(self):
         """Create file path, video folder, and audio folder selectors."""
         self.file_path_edit = self._create_path_widget(
             label="File path:",
@@ -87,7 +115,7 @@ class DataWidget(QWidget):
         self.audio_folder_edit = self._create_path_widget(
             label="Audio folder:",
             object_name="audio_folder",
-            browse_callback=lambda: self.on_browse_clicked("folder", "audio"),
+            browse_callback=lambda: self.on_browse_clicked("audio_file"), # folder, audio
         )
 
     def _create_load_button(self):
@@ -96,97 +124,7 @@ class DataWidget(QWidget):
         self.load_button.setObjectName("load_button")
         self.load_button.clicked.connect(lambda: self.on_load_clicked())
         self.layout().addRow(self.load_button)
-
-    def _create_trial_controls(self):
-        """Create controls for trial selection and navigation."""
-
-        # Video file dropdown
-        self.camera_combo = QComboBox()
-        self.camera_combo.setObjectName("camera_combo")
-        self.camera_combo.currentTextChanged.connect(self._on_camera_changed)
-        self.camera_combo.addItem("")  # Initialize empty
-
-        # Audio file dropdown
-        self.mic_combo = QComboBox()
-        self.mic_combo.setObjectName("mic_combo")
-        self.mic_combo.currentTextChanged.connect(self._on_mic_changed)
-        self.mic_combo.addItem("")  # Initialize empty
-
-        self.media_combo = QHBoxLayout()
-        self.media_combo.addWidget(self.camera_combo)
-        self.media_combo.addWidget(self.mic_combo)
-        self.layout().addRow(self.media_combo)
-
-        # Playback FPS input (QLineEdit instead of dropdown)
-        self.fps_playback_edit = QLineEdit()
-        self.fps_playback_edit.setObjectName("fps_playback_edit")
-        self.fps_playback_edit.setText("30")
-        self.fps_playback_edit.editingFinished.connect(self._on_fps_changed)
-        self.layout().addRow("Playback FPS:", self.fps_playback_edit)
-
-        # Keypoint dropdown
-        self.keypoint_combo = QComboBox()
-        self.keypoint_combo.setObjectName("keypoint_combo")
-        self.keypoint_combo.currentTextChanged.connect(self._on_keypoint_changed)
-        self.layout().addRow("Keypoint:", self.keypoint_combo)
-
-        # Variable dropdown
-        self.variable_combo = QComboBox()
-        self.variable_combo.setObjectName("variable_combo")
-        # Don't add items here - they'll be populated when ds is loaded
-        self.variable_combo.currentTextChanged.connect(self._on_variable_changed)
-        self.layout().addRow("Variable:", self.variable_combo)
-
-        # Color variable dropdown (for RGB coloring)
-        self.color_variable_combo = QComboBox()
-        self.color_variable_combo.setObjectName("color_variable_combo")
-        self.color_variable_combo.addItem("None")  # Default option for no coloring
-        self.color_variable_combo.currentTextChanged.connect(self._on_color_variable_changed)
-        self.layout().addRow("Color Variable:", self.color_variable_combo)
-
-        # Trial condition filtering with two dropdowns
-        self.trial_condition_key_combo = QComboBox()
-        self.trial_condition_key_combo.setObjectName("trial_condition_key_combo")
-        self.trial_condition_key_combo.currentTextChanged.connect(
-            self._on_trial_condition_key_changed
-        )
-
-        self.trial_condition_value_combo = QComboBox()
-        self.trial_condition_value_combo.setObjectName("trial_condition_value_combo")
-        self.trial_condition_value_combo.addItem("None")  # Default option for no filtering
-        self.trial_condition_value_combo.currentTextChanged.connect(
-            self._on_trial_condition_value_changed
-        )
-
-        # Create horizontal layout for the two dropdowns
-        self.trial_condition_layout = QHBoxLayout()
-        self.trial_condition_layout.addWidget(self.trial_condition_key_combo)
-        self.trial_condition_layout.addWidget(self.trial_condition_value_combo)
-        self.layout().addRow("Filter by Condition:", self.trial_condition_layout)
-
-        # Trial dropdown
-        self.trial_combo = QComboBox()
-        self.trial_combo.setObjectName("trial_combo")
-        self.trial_combo.currentTextChanged.connect(self._on_trial_changed)
-        self.layout().addRow("Trial:", self.trial_combo)
-
-        # Previous/Next trial buttons
-        self.prev_button = QPushButton("Previous Trial")
-        self.prev_button.setObjectName("prev_button")
-        self.prev_button.clicked.connect(self._on_prev_trial)
-
-        self.next_button = QPushButton("Next Trial")
-        self.next_button.setObjectName("next_button")
-        self.next_button.clicked.connect(self._on_next_trial)
-
-        # Layout for navigation buttons
-        self.nav_layout = QHBoxLayout()
-        self.nav_layout.addWidget(self.prev_button)
-        self.nav_layout.addWidget(self.next_button)
-        self.layout().addRow("Navigation:", self.nav_layout)
-
-        # Initially disable trial controls until data is loaded
-        self._set_trial_controls_enabled(False)
+        
 
     def on_browse_clicked(self, browse_type: str = "file", media_type: str | None = None):
         """
@@ -214,7 +152,7 @@ class DataWidget(QWidget):
             if media_type == "video":
                 caption += f"video files ({' '.join(VIDEO_EXTENSIONS)})"
             elif media_type == "audio":
-                caption += f"audio files ({' '.join(AUDIO_EXTENSIONS)})"
+                caption += "audio files"
             folder_path = QFileDialog.getExistingDirectory(None, caption=caption)
 
             if media_type == "video" and validate_media_folder(folder_path, "video"):
@@ -228,326 +166,358 @@ class DataWidget(QWidget):
                     f"Selected folder does not contain valid {media_type} files or is empty."
                 )
 
+        elif browse_type == "audio_file":
+            result = QFileDialog.getOpenFileName(
+                None,
+                caption="Open audio file",
+            )
+            audio_file_path = result[0] if result and len(result) >= 1 else ""
+            if not audio_file_path:
+                return
+            self.audio_folder_edit.setText(audio_file_path)
+            self.app_state.audio_folder = audio_file_path
+
     def on_load_clicked(self):
         """Load the file and show line plot in napari dock."""
-        file_path = self.file_path_edit.text()
+        
 
-        ds, info, error = load_dataset(file_path)
-        if error:
-            raise ValueError(f"Failed to load dataset: {error}")
 
-        self.app_state.ds = ds
+        # Load ds
+        file_path = self.file_path_edit.text()        
+        self.app_state.ds, self.type_vars_dict = load_dataset(file_path)
+        self.trials = list(self.app_state.ds.trials.values)
 
-        trials = ds.coords["trial"].values.tolist()
-        available_variables = [
-            var
-            for var in ds.data_vars
-            if "type" in ds[var].attrs and ds[var].attrs["type"] == "feature"
-        ]
-        print(f"Successfully loaded dataset with {len(trials)} trials")
 
-        # Update app state with loaded data
-        for key, value in info.items():
-            if hasattr(self.app_state, key):
-                setattr(self.app_state, key, value)
-            print(f"Loaded {key}: {value}")
 
-        self.app_state.available_variables = available_variables
+        self._create_trial_controls()
+        
+        # Load audio only if a path is provided
+        if self.audio_player is not None:
+            audio_path = self.audio_folder_edit.text()
+            if audio_path:
+                self.audio_player.load_audio_file(audio_path)
 
-        # Set current selections from previous state or defaults using helper method
-        self._restore_or_set_default_selections()
+        self._restore_or_set_defaults()
 
-        # Initialize trial condition system
-        if self.app_state.current_trial_condition_key:
-            self._update_trial_condition_values()
 
-        # Set FPS from app state
-        self.fps_playback_edit.setText(str(self.app_state.fps_playback))
 
-        self._update_dropdown()
+        self._set_controls_enabled(True)
 
-        # Only start plotting after controls are enabled
-        self._set_trial_controls_enabled(True)
 
         self._update_plot()
         self._update_video()
 
-    def _restore_or_set_default_selections(self):
-        """Restore saved selections from app_state or set defaults from available options."""
 
-        # Configuration for each selection: (current_attr, available_attr, combo_widget)
-        selection_configs = [
-            ("current_trial", "trials", self.trial_combo, False),
-            ("current_keypoint", "keypoints", self.keypoint_combo, False),
-            (
-                "current_variable",
-                "available_variables",
-                self.variable_combo,
-            ),
-            (
-                "current_color_variable",
-                "color_variables",
-                self.color_variable_combo,
-            ),
-            (
-                "current_trial_condition_key",
-                "trial_condition_keys",
-                self.trial_condition_key_combo,
-            ),
-        ]
 
-        for (
-            current_attr,
-            available_attr,
-            combo_widget,
-        ) in selection_configs:
-            current_value = getattr(self.app_state, current_attr)
-            available_values = getattr(self.app_state, available_attr)
 
-            if available_values:  # Only proceed if there are available options
-                if current_value and current_value in available_values:
-                    # Restore saved selection if it's still valid
-                    combo_widget.setCurrentText(str(current_value))
-                else:
-                    # Set to first available option as default
-                    setattr(self.app_state, current_attr, available_values[0])
-                    combo_widget.setCurrentText(str(available_values[0]))
+    def _create_trial_controls(self):
+        """Create all trial-related controls based on info configuration."""
+        
+        # Create widgets in the desired order: cameras, fps_playback, mics, audio player, then gap
+        
+        # 1. Cameras first
+        if "cameras" in self.type_vars_dict.keys():
+            self._create_combo_widget("cameras", self.type_vars_dict["cameras"])
+        else:
+            combo = QComboBox()
+            combo.setObjectName("cameras_combo")
+            combo.currentTextChanged.connect(self._on_combo_changed)
+            combo.addItems(["None"])
+            self.layout().addRow("Cameras:", combo)
+        
+        # 2. Playback FPS second
+        self.fps_playback_edit = QLineEdit()
+        self.fps_playback_edit.setObjectName("fps_playback_edit")
+        self.fps_playback_edit.setText("30")
+        self.fps_playback_edit.editingFinished.connect(self._on_fps_changed)
+        self.layout().addRow("Playback FPS:", self.fps_playback_edit)
+        self.controls.append(self.fps_playback_edit)
+        
+        # 3. Mics third
+        if "mics" in self.type_vars_dict.keys():
+            self._create_combo_widget("mics", self.type_vars_dict["mics"])
+        else:
+            combo = QComboBox()
+            combo.setObjectName("mics_combo")
+            combo.currentTextChanged.connect(self._on_combo_changed)
+            combo.addItems(["None"])
+            self.layout().addRow("Mics:", combo)
 
-            # Current variable is required.
-            elif current_attr == "current_variable":
-                show_error(
-                    "No feature variables found. Please specify one. E.g. ds['pos'].attrs['type'] = 'feature'"
-                )
+        # 4. Single Audio player instance (optional)
+        self.audio_player = AudioPlayer(self.viewer, app_state=self.app_state)
+        self.layout().addRow("Audio Player:", self.audio_player)
+        self._connect_video_audio()
 
-    def _update_dropdown(self):
-        """Update all dropdown contents."""
 
-        self.trial_combo.clear()
-        self.trial_combo.addItems([str(trial) for trial in self.app_state.trials])
 
-        self.keypoint_combo.clear()
-        self.keypoint_combo.addItems(self.app_state.keypoints)
-        self.keypoint_combo.setEnabled(bool(self.app_state.keypoints))
+        # 5. Add gap (empty row) for separation
+        gap_label = QLabel("")
+        gap_label.setFixedHeight(10)  # Create visual gap
+        self.layout().addRow(gap_label)
 
-        self.variable_combo.clear()
-        self.variable_combo.addItems(self.app_state.available_variables)
 
-        self.color_variable_combo.clear()
-        self.color_variable_combo.addItem("None")
-        self.color_variable_combo.addItems(self.app_state.color_variables)
+        # 6. Now add remaining controls
+        remaining_type_vars = ["individuals", "keypoints", "features", "colors", "trial_conditions"]
+        for type_var in remaining_type_vars:
+            if type_var in self.type_vars_dict.keys():
+                self._create_combo_widget(type_var, self.type_vars_dict[type_var])
+            else:
+                combo = QComboBox()
+                combo.setObjectName(f"{type_var}_combo")
+                combo.currentTextChanged.connect(self._on_combo_changed)
+                combo.addItems(["None"])
+                self.layout().addRow(f"{type_var.capitalize()}:", combo)
 
-        self.trial_condition_key_combo.clear()
-        self.trial_condition_key_combo.addItems(self.app_state.trial_condition_keys)
+        
+        self.trials_combo = QComboBox()
+        self.trials_combo.setObjectName("trials_combo")
+        self.trials_combo.currentTextChanged.connect(self._on_trial_changed)
+        self.trials_combo.addItems(str(int(trial)) for trial in self.trials)
+        self.layout().addRow("Trials:", self.trials_combo)
+        self.controls.append(self.trials_combo)
 
-        self.trial_condition_value_combo.clear()
-        self.trial_condition_value_combo.addItem("None")
+        # Previous/Next trial buttons
+        self.prev_button = QPushButton("Previous Trial")
+        self.prev_button.setObjectName("prev_button")
+        self.prev_button.clicked.connect(lambda: self._update_trial(-1))
+        self.controls.append(self.prev_button)
 
-        if (
-            self.app_state.current_trial_condition_key
-            and self.app_state.current_trial_condition_key in self.app_state.ds.coords
-        ):
-            unique_values = np.unique(
-                self.app_state.ds.coords[self.app_state.current_trial_condition_key].values
-            )
-            self.trial_condition_value_combo.addItems(
-                [str(int(val)) for val in np.sort(unique_values)]
-            )
+        self.next_button = QPushButton("Next Trial")
+        self.next_button.setObjectName("next_button")
+        self.next_button.clicked.connect(lambda: self._update_trial(1))
+        self.controls.append(self.next_button)
 
-        self.camera_combo.clear()
-        self.camera_combo.addItems(self.app_state.cameras)
+        # Layout for navigation buttons
+        nav_layout = QHBoxLayout()
+        nav_layout.addWidget(self.prev_button)
+        nav_layout.addWidget(self.next_button)
+        self.layout().addRow("Navigation:", nav_layout)
 
-        self.mic_combo.clear()
-        self.mic_combo.addItems(self.app_state.mics)
+        # Initially disable trial controls until data is loaded
+        self._set_controls_enabled(False)
+        
 
-    def _set_trial_controls_enabled(self, enabled: bool):
-        """Enable or disable all buttons."""
-        buttons = [
-            self.trial_combo,
-            self.keypoint_combo,
-            self.variable_combo,
-            self.color_variable_combo,
-            self.trial_condition_key_combo,
-            self.trial_condition_value_combo,
-            self.camera_combo,
-            self.mic_combo,
-            self.prev_button,
-            self.next_button,
-        ]
-        for combo in buttons:
-            combo.setEnabled(enabled)
 
+    def _set_controls_enabled(self, enabled: bool):
+        """Enable or disable all trial-related controls."""
+        for control in self.controls:
+            control.setEnabled(enabled)
         self.app_state.ready = enabled
 
-    def _on_trial_changed(self, trial_text: str):
-        """Handle trial selection change from UI."""
-        try:
-            self.app_state.current_trial = int(trial_text)
-        except ValueError:
+
+    def _create_combo_widget(self, key, vars):
+        """Create a combo box widget for a given info key."""
+        
+        combo = QComboBox()
+        combo.setObjectName(f"{key}_combo")
+        combo.currentTextChanged.connect(self._on_combo_changed)
+        if key in ['colors', 'trial_conditions']:
+            colour_variables = ["None"] + [str(var) for var in vars]
+            combo.addItems(colour_variables)
+        else:
+            combo.addItems([str(var) for var in vars])
+
+        self.layout().addRow(f"{key.capitalize()}:", combo)
+        
+        self.combos[key] = combo
+        self.controls.append(combo)
+
+        if key == "trial_conditions":
+                self.trial_conditions_value_combo = QComboBox()
+                self.trial_conditions_value_combo.setObjectName("trial_condition_value_combo")
+                self.trial_conditions_value_combo.addItem("None")
+                self.trial_conditions_value_combo.currentTextChanged.connect(self._on_trial_condition_values_changed)
+                self.layout().addRow("Filter by condition:", self.trial_conditions_value_combo)
+                self.controls.append(self.trial_conditions_value_combo)
+        return combo
+
+    
+    def _on_combo_changed(self):
+        if not self.app_state.ready:
             return
 
-        self._update_video()
-        self._update_plot()
+        # Figure out which key this belongs to. E.g. if value 
+        combo = self.sender()
+        for key, value in self.combos.items():
+            if value is combo:
+                break
+        
+        self.app_state.set_key_sel(key, combo.currentText())
 
-    def next_trial(self):
-        """Go to the next trial. Can be called by shortcut."""
-        self._on_next_trial()
 
-    def prev_trial(self):
-        """Go to the previous trial."""
-        self._on_prev_trial()
-
-    def _on_prev_trial(self):
-        """Navigate to previous trial."""
-        if self._navigate_trial(-1):
-            # Directly update video and plot without setting currentText to avoid double-calling
-            self._update_video()
+        if key in ["cameras", "mics"]:
+            self._update_video() 
+        elif key in ["features", "colors", "individuals", "keypoints"]:
             self._update_plot()
+        elif key == "trial_conditions":
+            self._update_trial_condition_values()
+    
+        
 
-    def _on_next_trial(self):
-        """Navigate to next trial."""
-        if self._navigate_trial(1):
-            self._update_video()
-            self._update_plot()
 
-    def _navigate_trial(self, direction: int) -> bool:
-        """Navigate to next/previous trial."""
-        if self.app_state.current_trial is None or not self.app_state.trials:
-            return False
+    def _on_trial_changed(self):
+        if not self.app_state.ready:
+            return
+
+        current_text = self.trials_combo.currentText()
+        if not current_text or current_text.strip() == '':
+            return  # Skip if no valid selection
+        
         try:
-            idx = self.app_state.trials.index(self.app_state.current_trial) + direction
-
-            if 0 <= idx < len(self.app_state.trials):
-                self.app_state.current_trial = self.app_state.trials[idx]
-                # Update the combo box text without triggering the signal
-                self.trial_combo.blockSignals(True)
-                self.trial_combo.setCurrentText(str(self.app_state.current_trial))
-                self.trial_combo.blockSignals(False)
-                return True
+            trial_value = int(current_text)
+            self.app_state.set_key_sel("trials", trial_value)
+            self._update_plot()
+            self._update_video()
         except ValueError:
-            pass
-        return False
+            # Handle invalid integer conversion gracefully
+            return
+        
 
-    def _on_camera_changed(self, camera: str):
-        """Handle camera selection change from UI."""
-        self.app_state.current_camera = camera
-        self._update_video()
+    def _restore_or_set_defaults(self):
+        """Restore saved selections from app_state or set defaults from available options."""
+        
 
-    def _on_mic_changed(self, mic: str):
-        """Handle microphone selection change from UI."""
-        self.app_state.current_mic = mic
-        # TODO: Implement audio update logic here if/when needed.
+        for key, vars in self.type_vars_dict.items():
+            combo = self.combos.get(key)
 
+            if combo is not None:
+                if self.app_state.key_sel_exists(key):
+                    combo.setCurrentText(str(self.app_state.get_key_sel(key)))
+                elif key == "trial_conditions":
+                    # Always default to None
+                    combo.setCurrentText("None")
+                    self.app_state.set_key_sel(key, "None")
+                else:
+                    # Default to first value
+                    combo.setCurrentText(str(vars[0]))
+                    self.app_state.set_key_sel(key, str(vars[0]))
+
+
+        if self.app_state.key_sel_exists("trials"):
+            self.trials_combo.setCurrentText(str(self.app_state.get_key_sel("trials")))
+            self.app_state.trials_sel = int(self.app_state.get_key_sel("trials"))
+        else:
+            # Default to first value
+            self.trials_combo.setCurrentText(str(self.trials[0]))
+            self.app_state.trials_sel =  int(self.trials[0])
+
+  
     def _on_fps_changed(self):
         """Handle playback FPS change from UI."""
-        fps = int(self.fps_playback_edit.text())
+        fps = float(self.fps_playback_edit.text())
         self.app_state.fps_playback = fps
-
-    def _on_keypoint_changed(self, keypoint: str):
-        """Handle keypoint selection change from UI."""
-        self.app_state.current_keypoint = keypoint
-        self._update_plot()
-
-    def _on_variable_changed(self, variable: str):
-        """Handle variable selection change from UI."""
-        self.app_state.current_variable = variable
-        self._update_plot()
-
-    def _on_color_variable_changed(self, color_variable: str):
-        """Handle color variable selection change from UI."""
-        if color_variable == "None":
-            self.app_state.current_color_variable = None
-        else:
-            self.app_state.current_color_variable = color_variable
-        self._update_plot()
-
-    def _on_trial_condition_key_changed(self, condition_key: str):
-        """Handle trial condition key selection change from UI."""
-        self.app_state.current_trial_condition_key = condition_key if condition_key else None
-        self._update_trial_condition_values()
+ 
 
     def _update_trial_condition_values(self):
         """Update the trial condition value dropdown based on selected key."""
-        self.trial_condition_value_combo.blockSignals(True)
-        self.trial_condition_value_combo.clear()
-        self.trial_condition_value_combo.addItem("None")  # Default option
+        filter_condition = self.app_state.trial_conditions_sel
 
-        if (
-            self.app_state.current_trial_condition_key
-            and self.app_state.current_trial_condition_key in self.app_state.ds.coords
-        ):
-            # Get unique values for the selected condition key
-            unique_values = np.unique(
-                self.app_state.ds.coords[self.app_state.current_trial_condition_key].values
-            )
-            self.trial_condition_value_combo.addItems(
-                [str(int(val)) for val in np.sort(unique_values)]
-            )
-
-        self.trial_condition_value_combo.blockSignals(False)
-
-    def _on_trial_condition_value_changed(self, condition_value: str):
-        """Handle trial condition value selection change from UI."""
-        if condition_value == "None":
-            self.app_state.current_trial_condition_value = None
-        else:
-            self.app_state.current_trial_condition_value = condition_value
-
-        # Block signals to prevent unnecessary updates during filtering
-        self.trial_combo.blockSignals(True)
-        self._update_filtered_trials()
-        self.trial_combo.blockSignals(False)
-        self._update_plot()
-
-    def _update_filtered_trials(self):
-        """Update the available trials based on condition filtering."""
-
-        coord_key = self.app_state.current_trial_condition_key
-        coord_value = self.app_state.current_trial_condition_value
-
-        if coord_key and coord_value and coord_value != "None":
-            # Filter trials based on condition
-            ds = self.app_state.ds.copy(deep=True)
-            filtered_trials = ds.trial.where(ds[coord_key] == int(coord_value), drop=True).values
-            self.app_state.trials = list(filtered_trials)
-        else:
+        if filter_condition == "None":
+            self.trial_conditions_value_combo.setCurrentText("None")
             return
 
-        # Update trials dropdown
-        self.trial_combo.clear()
-        self.trial_combo.addItems([str(int(trial)) for trial in self.app_state.trials])
 
-        if self.app_state.current_trial not in self.app_state.trials:
-            self.app_state.current_trial = int(self.app_state.trials[0])
-            self.trial_combo.setCurrentText(str(self.app_state.current_trial))
+        self.trial_conditions_value_combo.blockSignals(True)
+        self.trial_conditions_value_combo.clear()
+
+
+        if filter_condition in self.app_state.ds.coords:
+            # Get unique values for the selected condition key
+            unique_values = np.unique(self.app_state.ds.coords[filter_condition].values)
+
+            self.trial_conditions_value_combo.addItems(
+              ["None"] + [str(int(val)) for val in np.sort(unique_values)]
+            )
+
+        self.trial_conditions_value_combo.blockSignals(False)
+     
+
+    def _on_trial_condition_values_changed(self):
+        """Update the available trials based on condition filtering."""
+        filter_condition = self.app_state.trial_conditions_sel
+        filter_value = self.trial_conditions_value_combo.currentText()
+
+        original_trials = self.app_state.ds.trials.values
+
+        if filter_condition != "None" and filter_value != "None":
+            # Filter trials based on condition
+            ds = self.app_state.ds.copy(deep=True)
+            filtered_trials = ds.trials.where(ds[filter_condition] == int(filter_value), drop=True).values
+
+            self.trials = [trial for trial in original_trials if trial in filtered_trials]
+        else:
+            # Reset to all trials
+            self.trials = original_trials
+
+        # Update trials dropdown
+        self.trials_combo.clear()
+        self.trials_combo.addItems([str(int(trial)) for trial in self.trials])
+
+        # Update current trial if needed
+        if self.app_state.trials_sel not in self.trials:
+            if self.trials:
+                self.app_state.trials_sel = int(self.trials[0])
+                self.trials_combo.setCurrentText(str(self.app_state.trials_sel))
+
+
+        self.trials_combo.blockSignals(False)
+        self._update_plot()
+
+
+    # Navigation methods
+    def next_trial(self):
+        """Go to the next trial. Can be called by shortcut."""
+        self._update_trial(1)
+
+    def prev_trial(self):
+        """Go to the previous trial."""
+        self._update_trial(-1)
+
+
+    def _update_trial(self, direction: int):
+        """Navigate to next/previous trial."""
+
+        curr_idx = self.trials.index(self.app_state.trials_sel) 
+        new_trial = self.trials[curr_idx + direction] 
+ 
+        if 0 <= new_trial <= max(self.trials):
+            self.app_state.trials_sel = new_trial
+
+            # Update the combo box text without triggering the signal
+            self.trials_combo.blockSignals(True)
+            self.trials_combo.setCurrentText(str(new_trial))
+            self.trials_combo.blockSignals(False)
+
+            self._update_video()
+            self._update_plot()  
+
+
+
 
     def _update_video(self):
+        """Update video display based on current selections."""
         if not self.app_state.ready:
             return
 
         try:
             file_name = (
-                self.app_state.ds[self.camera_combo.currentText()]
-                .sel(trial=self.app_state.current_trial)
+                self.app_state.ds[self.app_state.cameras_sel]
+                .sel(trials=self.app_state.trials_sel)
                 .values.item()
             )
             video_path = os.path.join(self.app_state.video_folder, file_name)
 
-            # Remove existing video-like layers
-            layers_to_remove = []
+            # Remove all previous layers
             for layer in self.viewer.layers:
-                if "video" in layer.name.lower():
-                    layers_to_remove.append(layer)
-            for layer in layers_to_remove:
                 self.viewer.layers.remove(layer)
 
             # Open new video
-            video_layer = self.viewer.open(video_path)
-            if isinstance(video_layer, list) and video_layer:
-                video_layer = video_layer[0]
-            if hasattr(video_layer, "name"):
-                video_layer.name = "video"
+            self.viewer.open(video_path)
+
+
+
         except (OSError, AttributeError, ValueError) as e:
-            print(f"Error loading video: {e}")
+            show_error(f"Error loading video: {e}")
 
     def _update_plot(self):
         """Update the line plot with current trial/keypoint/variable selection."""
@@ -555,25 +525,35 @@ class DataWidget(QWidget):
             return
 
         try:
-            print("1")
-            self.LinePlot.updateLinePlot(
-                self.app_state.ds,
-                self.app_state.current_trial,
-                self.app_state.current_keypoint,
-                self.app_state.current_variable,
-                self.app_state.current_color_variable,
-            )
+            self.lineplot.updateLinePlot()
 
-            print("2")
-            time_data = self.app_state.ds.sel(
-                trial=self.app_state.current_trial,
-                keypoints=self.app_state.current_keypoint,
-            ).time.values
-            labels = self.app_state.ds.sel(
-                trial=self.app_state.current_trial,
-                keypoints=self.app_state.current_keypoint,
-            ).labels.values
+            ds = self.app_state.ds
+            ds_kwargs = self.app_state.get_ds_kwargs()
+            time_data = ds.time.values
+            labels = ds.sel(**ds_kwargs).labels.values
             self.labels_widget.plot_all_motifs(time_data, labels)
 
         except (KeyError, AttributeError, ValueError) as e:
-            print(f"Error updating plot: {e}")
+            show_error(f"Error updating plot: {e}")
+
+
+    def _connect_video_audio(self):
+        # Connect video to audio            
+        if self.audio_player is not None:
+            qt_dims = self.viewer.window._qt_viewer.dims
+            qt_dims._animation_thread.started.connect(self._on_napari_play_started)
+            qt_dims._animation_thread.finished.connect(self._on_napari_play_stopped)
+
+
+    def _on_napari_play_started(self):
+        if self.audio_player:
+            self.audio_player._start_playback()
+
+
+    def _on_napari_play_stopped(self):
+        if self.audio_player:
+            self.audio_player._stop_playback()
+
+
+
+      
