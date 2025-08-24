@@ -1,17 +1,19 @@
 """Observable application state container with change notifications."""
 
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import xarray as xr
 import yaml
-from qtpy.QtCore import QObject, QTimer, Signal
 from napari.settings import get_settings
+from qtpy.QtCore import QObject, QTimer, Signal
+
 
 @dataclass
 class AppState:
     """Data container for all shared application state."""
-    
 
     # Dataset and data loading (NOT saved to YAML)
     ds: xr.Dataset | None = None
@@ -22,7 +24,7 @@ class AppState:
     audio_folder: str | None = None
 
     # Dynamic data from dataset info (populated from dataset, NOT saved to YAML)
-    _info_data: dict = field(default_factory=dict)
+    _info_data: dict[str, Any] = field(default_factory=dict)
 
     # Playback settings (saved to YAML)
     fps_playback: float = 30.0
@@ -40,7 +42,6 @@ class AppState:
 
     # UI state (NOT saved to YAML)
     ready: bool = False
-
 
     # Additional current selections not directly from info (saved to YAML)
     trials_sel_condition_value: str | None = None
@@ -67,10 +68,6 @@ class AppState:
         # Add any attributes ending with _sel
         sel_attrs = {attr for attr in self.__dict__ if attr.endswith("_sel")}
         return base_attrs | sel_attrs
-
-
-
-
 
 
 class ObservableAppState(QObject):
@@ -104,8 +101,7 @@ class ObservableAppState(QObject):
     # UI state signals
     ready_changed = Signal(bool)
 
-
-    def __init__(self, yaml_path: str | None = None, auto_save_interval: int = 10000):
+    def __init__(self, yaml_path: str | None = None, auto_save_interval: int = 10000) -> None:
         super().__init__()
         self._state = AppState()
         self.settings = get_settings()  # Get napari settings instance
@@ -155,24 +151,18 @@ class ObservableAppState(QObject):
         self._state.audio_folder = value
         self.audio_folder_changed.emit(value)
 
-
-
     # Playback settings properties
     @property
     def fps_playback(self):
         return self._state.fps_playback
 
-
-
     @fps_playback.setter
     def fps_playback(self, value):
         self._state.fps_playback = value
         self.fps_playback_changed.emit(value)
-        
+
         # Set napari playback fps for fast/slow playback
         self.settings.application.playback_fps = value
-        
-
 
     # Plot settings properties
     @property
@@ -281,11 +271,9 @@ class ObservableAppState(QObject):
         self._state.ready = value
         self.ready_changed.emit(value)
 
-
-
     def get_ds_kwargs(self):
         ds_kwargs = {
-            "trials": getattr(self, "trials_sel"),
+            "trials": self.trials_sel,
         }
         # Ensure it's always int
         ds_kwargs["trials"] = int(ds_kwargs["trials"])
@@ -295,7 +283,7 @@ class ObservableAppState(QObject):
         if hasattr(self, "individuals_sel"):
             ds_kwargs["individual"] = self.individuals_sel
         return ds_kwargs
-    
+
     def key_sel_exists(self, type_key: str) -> bool:
         """Check if a key selection exists for a given type."""
         return hasattr(self, f"{type_key}_sel")
@@ -313,35 +301,34 @@ class ObservableAppState(QObject):
         attr_name = f"{type_key}_sel"
         old_value = getattr(self, attr_name, None)
         setattr(self, attr_name, currentValue)
-        
+
         # Emit a general data_updated signal when any _sel attribute changes
         if old_value != currentValue:
             self.data_updated.emit()
 
-
     def get_saveable_state_dict(self) -> dict:
         """Get a dictionary representation of only the saveable attributes."""
         state_dict = {}
-        
+
         # Get base saveable attributes (non-_sel attributes)
-        base_attrs = self._state._saveable_attributes - {attr for attr in self._state._saveable_attributes if attr.endswith('_sel')}
-        
+        base_attrs = self._state._saveable_attributes - {
+            attr for attr in self._state._saveable_attributes if attr.endswith("_sel")
+        }
+
         # Save base attributes from _state dataclass
         for attr_name in base_attrs:
             if hasattr(self._state, attr_name):
                 value = getattr(self._state, attr_name)
                 if value is not None:  # Only save non-None values
                     # Ensure numeric values are Python types, not numpy
-                    if isinstance(value, (int, float)) or hasattr(value, 'dtype'):
-                        try:
+                    if isinstance(value, int | float) or hasattr(value, "dtype"):
+                        with contextlib.suppress(TypeError, ValueError):
                             value = float(value)
-                        except (TypeError, ValueError):
-                            pass
                     state_dict[attr_name] = value
-        
+
         # Save ALL _sel attributes from self (ObservableAppState), not just predefined ones
         for attr_name in dir(self):
-            if attr_name.endswith('_sel') and not attr_name.startswith('_'):
+            if attr_name.endswith("_sel") and not attr_name.startswith("_"):
                 # Skip private attributes and methods
                 try:
                     value = getattr(self, attr_name)
@@ -350,7 +337,7 @@ class ObservableAppState(QObject):
                         state_dict[attr_name] = value
                 except (AttributeError, TypeError):
                     continue
-                    
+
         return state_dict
 
     def load_from_dict(self, state_dict: dict):
@@ -358,12 +345,9 @@ class ObservableAppState(QObject):
         for key, value in state_dict.items():
             if value is None:
                 continue
-                
+
             # Handle _sel attributes (including dynamically created ones)
-            if key.endswith('_sel'):
-                setattr(self, key, value)
-            # Handle other saveable attributes that exist in the base state
-            elif key in self._state._saveable_attributes and hasattr(self, key):
+            if key.endswith("_sel") or key in self._state._saveable_attributes and hasattr(self, key):
                 setattr(self, key, value)
 
     def save_to_yaml(self, yaml_path: str | None = None) -> bool:
