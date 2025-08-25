@@ -1,9 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git push:*)",
-      "Bash(git commit:*)",
-      "Bash(git add:*)"
+      "Read(/C:\\Users\\aksel/**)",
+      "mcp__Ref__ref_search_documentation",
+      "WebSearch",
+      "WebFetch(domain:bendalab.github.io)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []
