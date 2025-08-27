@@ -5,7 +5,10 @@
       "mcp__Ref__ref_search_documentation",
       "WebSearch",
       "WebFetch(domain:bendalab.github.io)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(python:*)",
+      "Bash(conda install:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

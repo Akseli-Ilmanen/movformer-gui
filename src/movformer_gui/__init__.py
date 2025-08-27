@@ -6,7 +6,6 @@ except ImportError:
 from .meta_widget import MetaWidget
 from .data_widget import DataWidget
 from .labels_widget import LabelsWidget
-from .lineplot import LinePlot
 from plot_utils import get_motif_colours, plot_ds_variable
 from file_utils import load_motif_mapping
 

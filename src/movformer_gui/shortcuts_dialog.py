@@ -95,11 +95,6 @@ class ShortcutsDialog(QDialog):
         # Add buttons
         button_layout = QHBoxLayout()
         
-        # Add Restore to Defaults button
-        restore_button = QPushButton("Restore to Defaults")
-        restore_button.clicked.connect(self._restore_to_defaults)
-        button_layout.addWidget(restore_button)
-        
         button_layout.addStretch()
         
         # Add close button
@@ -250,11 +245,6 @@ class ShortcutsDialog(QDialog):
                 "Right Click",
                 "Mouse",
                 "Play motif segment at cursor position - if clicked on an existing motif, plays that segment",
-            ),
-            (
-                "Right Click x2",
-                "Mouse",
-                "Interrupt current video playback - click right mouse button again while video is playing to stop it",
             ),
         ]
 

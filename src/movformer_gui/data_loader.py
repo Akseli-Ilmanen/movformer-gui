@@ -45,8 +45,10 @@ def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
     required_coords = ['trials', 'time']
     missing_coords = [coord for coord in required_coords if coord not in ds.coords]
 
-    if missing_coords:
-        error_msg = f"Dataset missing required coordinates: {missing_coords}"
+    required_vars = ["labels"]
+    missing_vars = [var for var in required_vars if var not in ds.data_vars]
+    if missing_vars:
+        error_msg = f"Dataset missing required variables: {missing_vars}"
         show_error(error_msg)
         return None, None
 
@@ -150,6 +152,20 @@ def validate_dataset_types(ds: xr.Dataset, info: dict) -> bool:
     """
     validation_errors = []
     
+    
+    labels = ds['labels'].values
+    if not isinstance(labels, np.ndarray):
+        labels = np.array(labels)
+    if np.issubdtype(labels.dtype, np.integer):
+        pass  # valid
+    elif np.issubdtype(labels.dtype, np.floating):
+        if not np.all(np.equal(np.mod(labels, 1), 0)):
+            validation_errors.append("Data variable 'labels' must be integers or floats representing whole numbers")
+    else:
+        validation_errors.append("Data variable 'labels' must be an array of integers or whole-number floats")
+
+    
+    
 
     # Check colors - must be numpy array of shape (N, 3)
     if 'colors' in info:
@@ -211,14 +227,8 @@ def validate_dataset_types(ds: xr.Dataset, info: dict) -> bool:
                 (np.issubdtype(changepoints.dtype, np.integer) and np.isin(changepoints, [0, 1]).all())):
             validation_errors.append("Data variable 'changepoints' must be a boolean array or contain only 0 and 1")
     
-    # Check labels - must be ints if present
-    if 'labels' in ds.data_vars:
-        labels = ds['labels'].values
-        if not isinstance(labels, np.ndarray):
-            labels = np.array(labels)
-        if not np.issubdtype(labels.dtype, np.integer):
-            validation_errors.append("Data variable 'labels' must be an array of integers")
-    
+
+
     # Report validation errors
     if validation_errors:
         error_msg = "Dataset validation failed:\n" + "\n".join(f"• {error}" for error in validation_errors)
@@ -238,7 +248,12 @@ def validate_media_folder(folder_path: str, media_type: str) -> bool:
     if not folder_path or not os.path.exists(folder_path):
         return False
     folder = Path(folder_path)
-    extensions = VIDEO_EXTENSIONS if media_type == 'video'  else []
+    if media_type == 'video':
+        extensions = VIDEO_EXTENSIONS
+    elif media_type == 'audio':
+        extensions = AUDIO_EXTENSIONS
+    else:
+        extensions = []
     for ext in extensions:
         if list(folder.glob(f'*{ext}')):
             return True

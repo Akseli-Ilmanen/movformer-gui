@@ -28,6 +28,10 @@ https://napari.org/stable/plugins/index.html
 You can install `movformer-gui` via [pip]:
 
 ```
+conda create -n behavformer -c conda-forge movement
+```
+
+```
 pip install movformer-gui
 ```
 
@@ -42,6 +46,14 @@ To install latest development version :
 
 ```
 pip install git+https://github.com/Akseli-Ilmanen/movformer-gui.git
+```
+
+JUST FOR ME: 
+
+```
+pip install -e.[all]
+pip install pydub audioio thunderhopper
+pip install imageio[pyav]
 ```
 
 

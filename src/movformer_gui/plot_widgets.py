@@ -1,6 +1,7 @@
 """Collapsible widget to control settings for all plots."""
 
 from qtpy.QtWidgets import QFormLayout, QLineEdit, QWidget, QPushButton, QVBoxLayout, QHBoxLayout
+from napari.viewer import Viewer
 
 class PlotsWidget(QWidget):
     """Plots controls.
@@ -14,12 +15,12 @@ class PlotsWidget(QWidget):
       - jump_size
     """
 
-    def __init__(self, app_state, parent=None):
+    def __init__(self, napari_viewer: Viewer, app_state, parent=None):
         super().__init__(parent=parent)
         self.app_state = app_state  # Use the shared app state
-        self.data_widget = None
+        self.viewer = napari_viewer  # Will be set after creation
         self.lineplot = None  # Will be set after creation
-        self.labels_widget = None  # Will be set after creation
+        
         
         # Main layout
         main_layout = QVBoxLayout()
@@ -43,15 +44,6 @@ class PlotsWidget(QWidget):
         self.audio_buffer_edit = QLineEdit()
         self.spec_buffer_edit = QLineEdit()
 
-        self.ymin_edit.setPlaceholderText("auto")
-        self.ymax_edit.setPlaceholderText("auto")
-        self.spec_ymin_edit.setPlaceholderText("auto")
-        self.spec_ymax_edit.setPlaceholderText("auto")
-        self.window_s_edit.setPlaceholderText("full")
-        self.jump_size_edit.setPlaceholderText("1.0")
-        self.audio_buffer_edit.setPlaceholderText("60.0")
-        self.spec_buffer_edit.setPlaceholderText("5.0")
-
         layout.addRow("Y min (lineplot):", self.ymin_edit)
         layout.addRow("Y max (lineplot):", self.ymax_edit)
         layout.addRow("Y min (spectrogram):", self.spec_ymin_edit)
@@ -72,50 +64,62 @@ class PlotsWidget(QWidget):
         self.spec_buffer_edit.editingFinished.connect(self._on_edited)
 
         # Load settings from YAML via app_state (handles None values properly)
-        if self.app_state is not None:
-            self._restore_or_set_default_selections()
+        self._restore_or_set_default_selections()
 
+
+
+        
     def set_lineplot(self, lineplot):
-        """Set the lineplot reference after creation."""
+        """Set references to other widgets after creation."""
         self.lineplot = lineplot
 
-    def set_labels_widget(self, labels_widget):
-        """Set the labels_widget reference after creation."""
-        self.labels_widget = labels_widget
 
-    def set_data_widget(self, data_widget):
-        """Set the data_widget reference after creation."""
-        self.data_widget = data_widget
-
-    def _sync_napari_frame(self):
-        """Sync napari viewer to the current plot center time."""
-        if (not self.app_state.ready or 
-            not hasattr(self, 'lineplot') or 
-            self.lineplot is None or 
-            self.labels_widget is None):
-            return
+        # Connect to app state signals for buffer changes
+        self._connect_app_state_signals()
         
-        try:
-            # Get current plot x-axis limits
-            ax = self.lineplot.ax
-            xmin_time, _ = ax.get_xlim()
-            
-            # Convert time to frame index using dataset fps
-            if hasattr(self.app_state, 'ds') and self.app_state.ds is not None:
-                fps = self.app_state.ds.fps
-                frame_idx = int(xmin_time * fps)
-                
-                # Make sure frame_idx is within bounds
-                if hasattr(self.app_state.ds, 'time'):
-                    max_frames = len(self.app_state.ds.time.values)
-                    frame_idx = max(0, min(frame_idx, max_frames - 1))
-                    
-                    # Update napari viewer frame
-                    self.labels_widget._set_frame(frame_idx)
-        except Exception as e:
-            print(f"Error syncing napari frame: {e}")
+        
+       # When user adjusts buffer size
+    def _connect_app_state_signals(self):
+        """Connect to app state signals that should trigger spectrogram buffer clearing."""
+        if hasattr(self.app_state, 'spec_buffer_changed'):
+            self.app_state.spec_buffer_changed.connect(self._on_spec_buffer_changed)
+        if hasattr(self.app_state, 'audio_buffer_changed'):
+            self.app_state.audio_buffer_changed.connect(self._on_audio_buffer_changed)
 
-    
+    def _on_spec_buffer_changed(self, value):
+        """Handle spectrogram buffer size change."""
+
+        if hasattr(self, 'lineplot') and self.lineplot is not None:
+            self.lineplot.clear_spectrogram_buffer()
+
+            
+    def _on_audio_buffer_changed(self, value):
+        """Handle audio buffer size change."""
+
+        if hasattr(self, 'lineplot') and self.lineplot is not None:
+            self.lineplot.clear_spectrogram_buffer()
+
+
+    def _restore_or_set_default_selections(self):
+        """Restore selections from app_state or set defaults if missing."""
+        for attr, edit in [
+            ("ymin", self.ymin_edit),
+            ("ymax", self.ymax_edit),
+            ("spec_ymin", self.spec_ymin_edit),
+            ("spec_ymax", self.spec_ymax_edit),
+            ("window_size", self.window_s_edit),
+            ("jump_size", self.jump_size_edit),
+            ("audio_buffer", self.audio_buffer_edit),
+            ("spec_buffer", self.spec_buffer_edit)
+        ]:
+            value = getattr(self.app_state, attr, None)
+            if value is None:
+                value = self.app_state.get_with_default(attr)
+                setattr(self.app_state, attr, value)
+            edit.setText("" if value is None else str(value))
+
+
+
 
     def _parse_float(self, text):
         s = (text or "").strip()
@@ -126,102 +130,70 @@ class PlotsWidget(QWidget):
         except ValueError:
             return None
 
-    def _restore_or_set_default_selections(self):
-        """Restore selections from app_state or set defaults if missing."""
-        for attr, edit, default in [
-            ("ymin", self.ymin_edit, ""),
-            ("ymax", self.ymax_edit, ""),
-            ("spec_ymin", self.spec_ymin_edit, ""),
-            ("spec_ymax", self.spec_ymax_edit, ""),
-            ("window_size", self.window_s_edit, ""),
-            ("jump_size", self.jump_size_edit, "0.2"),
-            ("audio_buffer", self.audio_buffer_edit, "60.0"),
-            ("spec_buffer", self.spec_buffer_edit, "5.0")
-        ]:
-            value = getattr(self.app_state, attr, None)
-            if value is None and attr in ["jump_size", "audio_buffer", "spec_buffer"]:
-                edit.setText(default)
-            else:
-                edit.setText("" if value is None else str(value))
 
 
     def _on_edited(self):
         """Handle when user edits the input fields."""
-        ymin = self._parse_float(self.ymin_edit.text())
-        ymax = self._parse_float(self.ymax_edit.text())
-        spec_ymin = self._parse_float(self.spec_ymin_edit.text())
-        spec_ymax = self._parse_float(self.spec_ymax_edit.text())
-        window_size = self._parse_float(self.window_s_edit.text())
-        jump_size = self._parse_float(self.jump_size_edit.text())
-        audio_buffer = self._parse_float(self.audio_buffer_edit.text())
-        spec_buffer = self._parse_float(self.spec_buffer_edit.text())
-        
-        # Default jump_size to 0.2 if None or invalid
-        if jump_size is None:
-            jump_size = 0.2
-        # Default audio_buffer to 60.0 if None or invalid
-        if audio_buffer is None:
-            audio_buffer = 60.0
-        # Default spec_buffer to 5.0 if None or invalid
-        if spec_buffer is None:
-            spec_buffer = 5.0
-
-        # Update app state
-        if self.app_state is not None:
-            self.app_state.ymin = ymin
-            self.app_state.ymax = ymax
-            self.app_state.spec_ymin = spec_ymin
-            self.app_state.spec_ymax = spec_ymax
-            self.app_state.window_size = window_size
-            self.app_state.jump_size = jump_size
-            self.app_state.audio_buffer = audio_buffer
-            self.app_state.spec_buffer = spec_buffer
+        edits = {
+            "ymin": self.ymin_edit,
+            "ymax": self.ymax_edit,
+            "spec_ymin": self.spec_ymin_edit,
+            "spec_ymax": self.spec_ymax_edit,
+            "window_size": self.window_s_edit,
+            "jump_size": self.jump_size_edit,
+            "audio_buffer": self.audio_buffer_edit,
+            "spec_buffer": self.spec_buffer_edit
+        }
+        values = {}
+        for attr, edit in edits.items():
+            val = self._parse_float(edit.text())
+            if val is None:
+                val = self.app_state.get_with_default(attr)
+            values[attr] = val
+            if self.app_state is not None:
+                setattr(self.app_state, attr, val)
 
         if self.lineplot is not None:
             # Determine which y-limits to use based on current plot type
             is_spectrogram = getattr(self.app_state, "plot_spectrogram", False)
             if is_spectrogram:
                 # Use spectrogram y-limits for spectrogram mode
-                self.lineplot.apply_axes_from_state(spec_ymin, spec_ymax, window_size)
+                self.lineplot.apply_axes_from_state(values["spec_ymin"], values["spec_ymax"], values["window_size"])
             else:
                 # Use line plot y-limits for line plot mode
-                self.lineplot.apply_axes_from_state(ymin, ymax, window_size)
-                
+                self.lineplot.apply_axes_from_state(values["ymin"], values["ymax"], values["window_size"])
             if hasattr(self.lineplot, "canvas"):
                 self.lineplot.canvas.draw()
-            
-            # Sync napari viewer frame after plot update
-            self._sync_napari_frame()
+                
+                
+            # Sync logic removed; will be handled by AudioVideoSync classes
+
 
     def _reset_to_defaults(self):
         """Reset all plot values to their defaults and update the plot."""
-        # Clear all text fields to defaults
-        self.ymin_edit.clear()
-        self.ymax_edit.clear()
-        self.spec_ymin_edit.clear()
-        self.spec_ymax_edit.clear()
-        self.window_s_edit.clear()
-        self.jump_size_edit.setText("0.2")  # Set jump_size to default
-        self.audio_buffer_edit.setText("60.0")  # Set audio_buffer to default
-        self.spec_buffer_edit.setText("5.0")  # Set spec_buffer to default
-        
-        # Update app state to None (which means 'auto' for most values)
-        if self.app_state is not None:
-            self.app_state.ymin = None
-            self.app_state.ymax = None
-            self.app_state.spec_ymin = None
-            self.app_state.spec_ymax = None
-            self.app_state.window_size = None
-            self.app_state.jump_size = 0.2
-            self.app_state.audio_buffer = 60.0
-            self.app_state.spec_buffer = 5.0
-        
+        for attr, edit in [
+            ("ymin", self.ymin_edit),
+            ("ymax", self.ymax_edit),
+            ("spec_ymin", self.spec_ymin_edit),
+            ("spec_ymax", self.spec_ymax_edit),
+            ("window_size", self.window_s_edit),
+            ("jump_size", self.jump_size_edit),
+            ("audio_buffer", self.audio_buffer_edit),
+            ("spec_buffer", self.spec_buffer_edit)
+        ]:
+            value = getattr(self.app_state, attr, None) if self.app_state is not None else None
+            if value is None:
+                value = self.app_state.get_with_default(attr)
+            # Set text field
+            edit.setText("" if value is None else str(value))
+            # Set app_state attribute if possible
+            if self.app_state is not None:
+                setattr(self.app_state, attr, value)
+
         # Trigger plot update
         self._on_edited()
-        
-        # Update data widget plot if available
-        if self.data_widget is not None:
-            self.data_widget._update_plot()
+
+
 
     def _adjust_ylim(self, percentage):
         """Adjust the y-axis limits by a percentage of the current range."""
@@ -274,8 +246,7 @@ class PlotsWidget(QWidget):
             self.ymin_edit.setText(f"{new_ymin:.3f}")
             self.ymax_edit.setText(f"{new_ymax:.3f}")
 
-        # Sync napari viewer frame after plot update
-        self._sync_napari_frame()
+    # Sync logic removed; handled by AudioVideoSync classes
 
 
     def _shift_plot(self, window_fraction):
@@ -312,8 +283,8 @@ class PlotsWidget(QWidget):
             if hasattr(self.lineplot, 'clear_spectrogram_buffer'):
                 self.lineplot.clear_spectrogram_buffer()
 
-            # Sync napari viewer frame after plot update
-            self._sync_napari_frame()
+            # Sync logic removed; handled by AudioVideoSync classes
+
 
     def _shift_yrange(self, percentage):
         """Shift the y-axis range up or down by a percentage of the current range."""
@@ -352,8 +323,7 @@ class PlotsWidget(QWidget):
         ax.set_ylim(new_ymin, new_ymax)
         self.lineplot.canvas.draw()
 
-        # Sync napari viewer frame after plot update
-        self._sync_napari_frame()
+    # Sync logic removed; handled by AudioVideoSync classes
 
         
 
@@ -378,10 +348,8 @@ class PlotsWidget(QWidget):
         # Update app state (ensure it's a Python float)
         self.app_state.window_size = float(new_window_size)
         
-        # Clear spectrogram buffer when window size changes significantly
-        if self.lineplot is not None and hasattr(self.lineplot, 'clear_spectrogram_buffer'):
-            self.lineplot.clear_spectrogram_buffer()
-        
+
+
         # Apply the new window size
         if self.lineplot is not None:
             # Determine which y-limits to use based on current plot type
@@ -400,8 +368,7 @@ class PlotsWidget(QWidget):
         # Update the plot widgets UI
         self.window_s_edit.setText(f"{new_window_size:.3f}")
 
-        # Sync napari viewer frame after plot update
-        self._sync_napari_frame()
+    # Sync logic removed; handled by AudioVideoSync classes
 
     def _jump_plot(self, direction):
         """Jump the plot view by the configured jump size in seconds."""
@@ -440,9 +407,4 @@ class PlotsWidget(QWidget):
             ax.set_xlim(new_xmin, new_xmax)
             self.lineplot.canvas.draw()
 
-            # Clear spectrogram buffer when jumping significantly
-            if hasattr(self.lineplot, 'clear_spectrogram_buffer'):
-                self.lineplot.clear_spectrogram_buffer()
-
-            # Sync napari viewer frame after plot update
-            self._sync_napari_frame()
+            # Sync logic removed; handled by AudioVideoSync classes

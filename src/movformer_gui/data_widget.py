@@ -1,40 +1,42 @@
 """Widget for selecting start/stop times and playing a segment in napari."""
 import os
 import numpy as np
-from napari.utils.events import Event
+import imageio.v3 as iio
+import cv2
 from napari.utils.notifications import show_error
 from napari.viewer import Viewer
+import napari
 from qtpy.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QVBoxLayout,
     QLineEdit,
     QPushButton,
     QWidget,
-    QSizePolicy,
     QApplication,
-    QShortcut,
     QLabel,
     QCheckBox,
-    QMessageBox,
+    QSlider,
 )
-from qtpy.QtGui import QKeySequence
 from qtpy.QtCore import Qt
 
-
-from movformer_gui.data_loader import (
+from .data_loader import (
     VIDEO_EXTENSIONS,
     load_dataset,
     validate_media_folder,
 )
-from movformer_gui.audio_player import AudioPlayer
+from .video_audio_streamer import VideoAudioStreamViewer
+from xarray_utils import sel_valid
+import napari
+
 
 
 class DataWidget(QWidget):
-    """Widget to control which data is loaded, displayed and stored for next time."""
 
+   
+    """Widget to control which data is loaded, displayed and stored for next time."""
+    
     def __init__(
         self,
         napari_viewer: Viewer,
@@ -52,21 +54,25 @@ class DataWidget(QWidget):
         self.labels_widget = None  # Will be set after creation
         self.plots_widget = None  # Will be set after creation
         self.audio_player = None  # Audio player widget
+        self.video_path = None
+        self.audio_path = None
 
         # Dictionary to store all combo boxes
         self.combos = {}
         # Dictionary to store all controls for enabling/disabling
         self.controls = []
+        
+        
+        
 
-
-    
-
+        self.app_state.audio_video_sync = None
         # E.g. {keypoints = ["beakTip, StickTip"], trials=[1, 2, 3, 4], ...}
         self.type_vars_dict = {} # Gets filled by load_dataset
 
+
         self._create_path_folder_widgets()
         self._create_load_button()
-
+        self._create_audio_volume_slider()
 
         # Restore UI text fields from app state
         if self.app_state.file_path:
@@ -78,39 +84,14 @@ class DataWidget(QWidget):
 
 
 
-
-        
-
-
-
-
-    def set_references(self, lineplot, labels_widget, plots_widget):
+    def set_references(self, lineplot, labels_widget, plots_widget, navigation_widget):
         """Set references to other widgets after creation."""
         self.lineplot = lineplot
         self.labels_widget = labels_widget
         self.plots_widget = plots_widget
+        self.navigation_widget = navigation_widget
         
-        # Connect to app state signals for buffer changes
-        self._connect_app_state_signals()
 
-    def _connect_app_state_signals(self):
-        """Connect to app state signals that should trigger spectrogram buffer clearing."""
-        if hasattr(self.app_state, 'spec_buffer_changed'):
-            self.app_state.spec_buffer_changed.connect(self._on_spec_buffer_changed)
-        if hasattr(self.app_state, 'audio_buffer_changed'):
-            self.app_state.audio_buffer_changed.connect(self._on_audio_buffer_changed)
-
-    def _on_spec_buffer_changed(self, value):
-        """Handle spectrogram buffer size change."""
-        # Clear spectrogram buffer when buffer size changes
-        if hasattr(self, 'lineplot') and self.lineplot is not None:
-            self.lineplot.clear_spectrogram_buffer()
-
-    def _on_audio_buffer_changed(self, value):
-        """Handle audio buffer size change."""
-        # Clear spectrogram buffer when audio buffer changes (affects audio loading)
-        if hasattr(self, 'lineplot') and self.lineplot is not None:
-            self.lineplot.clear_spectrogram_buffer()
 
 
     def _create_path_widget(self, label: str, object_name: str, browse_callback):
@@ -144,9 +125,24 @@ class DataWidget(QWidget):
         self.audio_folder_edit = self._create_path_widget(
             label="Audio folder:",
             object_name="audio_folder",
-            browse_callback=lambda: self.on_browse_clicked("audio_file"), # folder, audio
+            browse_callback=lambda: self.on_browse_clicked("folder", "audio"),
         )
+        
 
+        # Removing audio makes GUI faster.
+        self.clear_audio_checkbox = QCheckBox("Clear audio")
+        self.clear_audio_checkbox.setObjectName("clear_audio_checkbox")
+        self.clear_audio_checkbox.stateChanged.connect(self._on_clear_audio_checked)
+        self.layout().addRow(self.clear_audio_checkbox)
+
+ 
+
+
+    def _on_clear_audio_checked(self, state: int) -> None:
+        if state == Qt.Checked:
+            self.audio_folder_edit.setText('')
+            self.app_state.audio_folder = None
+            self.clear_audio_checkbox.setChecked(True)
 
 
     def _create_load_button(self):
@@ -156,6 +152,26 @@ class DataWidget(QWidget):
         self.load_button.clicked.connect(lambda: self.on_load_clicked())
         self.layout().addRow(self.load_button)
         
+    
+
+    def _create_audio_volume_slider(self):
+        """Create and add audio volume slider below microphones selection."""
+        self.volume_layout = QHBoxLayout()
+        self.volume_layout.addWidget(QLabel("Vol:"))
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        
+        self.volume_slider.setValue(self.app_state.get_with_default("audio_volume"))
+        self.volume_slider.setToolTip("Adjust playback volume")
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        self.volume_layout.addWidget(self.volume_slider, stretch=1)
+        self.layout().addRow(self.volume_layout)
+
+    def _on_volume_changed(self, value: int) -> None:
+        """Update playback volume in real time if playing."""
+        self.app_state.audio_volume = value
+
+
 
     def on_browse_clicked(self, browse_type: str = "file", media_type: str | None = None):
         """
@@ -184,7 +200,10 @@ class DataWidget(QWidget):
                 caption += f"video files ({' '.join(VIDEO_EXTENSIONS)})"
             elif media_type == "audio":
                 caption += "audio files"
+                
             folder_path = QFileDialog.getExistingDirectory(None, caption=caption)
+
+
 
             if media_type == "video" and validate_media_folder(folder_path, "video"):
                 self.video_folder_edit.setText(folder_path)
@@ -192,45 +211,27 @@ class DataWidget(QWidget):
             elif media_type == "audio" and validate_media_folder(folder_path, "audio"):
                 self.audio_folder_edit.setText(folder_path)
                 self.app_state.audio_folder = folder_path
+                self.clear_audio_checkbox.setChecked(False)
             else:
                 raise ValueError(
                     f"Selected folder does not contain valid {media_type} files or is empty."
                 )
 
-        elif browse_type == "audio_file":
-            result = QFileDialog.getOpenFileName(
-                None,
-                caption="Open audio file",
-            )
-            audio_file_path = result[0] if result and len(result) >= 1 else ""
-            if not audio_file_path:
-                return
-            self.audio_folder_edit.setText(audio_file_path)
-            self.app_state.audio_folder = audio_file_path
-
     def on_load_clicked(self):
         """Load the file and show line plot in napari dock."""
-        
+        self.setVisible(False)
 
 
 
         # Load ds
         file_path = self.file_path_edit.text()        
         self.app_state.ds, self.type_vars_dict = load_dataset(file_path)
-        self.trials = list(self.app_state.ds.trials.values)
-
-
+        self.app_state.trials = list(self.app_state.ds.trials.values)
+        self.navigation_widget.trials_combo.addItems([str(int(trial)) for trial in self.app_state.trials])
 
         self._create_trial_controls()
         
-        # Load audio only if a path is provided
-        if self.audio_player is not None:
-            audio_path = self.audio_folder_edit.text()
-            if audio_path:
-                self.audio_player.load_audio_file(audio_path)
-                # Clear spectrogram buffer when new audio is loaded
-                if hasattr(self, 'lineplot') and self.lineplot is not None:
-                    self.lineplot.clear_spectrogram_buffer()
+
 
         self._restore_or_set_defaults()
 
@@ -240,24 +241,29 @@ class DataWidget(QWidget):
 
 
         self._update_plot()
-        self._update_video()
-
-
+        self._update_video_audio()
 
         load_btn = self.findChild(QPushButton, "load_button")
         load_btn.setEnabled(False)
         load_btn.setText("Restart app to load new data")
 
+        # Initialize current_time and time_label
+        self.app_state.current_time = 0
+        self.app_state.current_frame = 0
 
+
+        self.setVisible(True)
         self._remove_ugly()
+
+
 
 
     def _remove_ugly(self):
         """Function to execute after on_load_clicked has been called."""
         # Simulate user expand/collapse so widget state and UI update as if user did it
-        self.meta_widget.collapsible_widgets[0].collapse()
+        self.meta_widget.collapsible_widgets[1].collapse()
         QApplication.processEvents()
-        self.meta_widget.collapsible_widgets[0].expand()
+        self.meta_widget.collapsible_widgets[1].expand()
         QApplication.processEvents()
 
   
@@ -280,7 +286,7 @@ class DataWidget(QWidget):
         # 2. Playback FPS second
         self.fps_playback_edit = QLineEdit()
         self.fps_playback_edit.setObjectName("fps_playback_edit")
-        self.fps_playback_edit.setText("30")
+        self.fps_playback_edit.setText(str(self.app_state.get_with_default("fps_playback")))
         self.fps_playback_edit.editingFinished.connect(self._on_fps_changed)
         self.layout().addRow("Playback FPS:", self.fps_playback_edit)
         self.controls.append(self.fps_playback_edit)
@@ -289,10 +295,7 @@ class DataWidget(QWidget):
         if "mics" in self.type_vars_dict.keys():
             self._create_combo_widget("mics", self.type_vars_dict["mics"])
         
-            # 4. Audio player fourth (Optional)
-            self.audio_player = AudioPlayer(self.viewer, app_state=self.app_state)
-            self.layout().addRow("Audio Player:", self.audio_player)
-            self._connect_video_audio()
+
 
         else:
             combo = QComboBox()
@@ -300,14 +303,9 @@ class DataWidget(QWidget):
             combo.currentTextChanged.connect(self._on_combo_changed)
             combo.addItems(["None"])
             self.layout().addRow("Mics:", combo)
-
             self.audio_player = None
         
 
-        # DELETE IN THE FUTURE; WHEN YOU CAN AUDIO PASSED VIA MICS
-        self.audio_player = AudioPlayer(self.viewer, app_state=self.app_state)
-        self.layout().addRow("Audio Player:", self.audio_player)
-        self._connect_video_audio()
 
         # Add spectrogram checkbox
         self.plot_spec_checkbox = QCheckBox("Plot spectrogram")
@@ -334,30 +332,6 @@ class DataWidget(QWidget):
                 combo.addItems(["None"])
                 self.layout().addRow(f"{type_var.capitalize()}:", combo)
 
-        
-        self.trials_combo = QComboBox()
-        self.trials_combo.setObjectName("trials_combo")
-        self.trials_combo.currentTextChanged.connect(self._on_trial_changed)
-        self.trials_combo.addItems(str(int(trial)) for trial in self.trials)
-        self.layout().addRow("Trials:", self.trials_combo)
-        self.controls.append(self.trials_combo)
-
-        # Previous/Next trial buttons
-        self.prev_button = QPushButton("Previous Trial")
-        self.prev_button.setObjectName("prev_button")
-        self.prev_button.clicked.connect(lambda: self._update_trial(-1))
-        self.controls.append(self.prev_button)
-
-        self.next_button = QPushButton("Next Trial")
-        self.next_button.setObjectName("next_button")
-        self.next_button.clicked.connect(lambda: self._update_trial(1))
-        self.controls.append(self.next_button)
-
-        # Layout for navigation buttons
-        nav_layout = QHBoxLayout()
-        nav_layout.addWidget(self.prev_button)
-        nav_layout.addWidget(self.next_button)
-        self.layout().addRow("Navigation:", nav_layout)
 
         # Initially disable trial controls until data is loaded
         self._set_controls_enabled(False)
@@ -412,7 +386,7 @@ class DataWidget(QWidget):
 
 
         if key in ["cameras", "mics"]:
-            self._update_video() 
+            self._update_video_audio
         elif key in ["features", "colors", "individuals", "keypoints"]:
             self._update_plot()
         elif key == "trial_conditions":
@@ -420,33 +394,9 @@ class DataWidget(QWidget):
     
         
 
-
-    def _on_trial_changed(self):
-        if not self.app_state.ready:
-            return
-
-        current_text = self.trials_combo.currentText()
-        if not current_text or current_text.strip() == '':
-            return  # Skip if no valid selection
-        
-        try:
-            trial_value = int(current_text)
-            self.app_state.set_key_sel("trials", trial_value)
-            self._update_plot()
-            self._update_video()
-
-
-            # Clear spectrogram buffer when switching trials
-            if hasattr(self, 'lineplot') and self.lineplot is not None:
-                self.lineplot.clear_spectrogram_buffer()
-
-        except ValueError:
-            # Handle invalid integer conversion gracefully
-            return
-        
-
     def _restore_or_set_defaults(self):
         """Restore saved selections from app_state or set defaults from available options."""
+        
         
 
         for key, vars in self.type_vars_dict.items():
@@ -466,12 +416,12 @@ class DataWidget(QWidget):
 
 
         if self.app_state.key_sel_exists("trials"):
-            self.trials_combo.setCurrentText(str(self.app_state.get_key_sel("trials")))
+            self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.get_key_sel("trials")))
             self.app_state.trials_sel = int(self.app_state.get_key_sel("trials"))
         else:
             # Default to first value
-            self.trials_combo.setCurrentText(str(self.trials[0]))
-            self.app_state.trials_sel =  int(self.trials[0])
+            self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials[0]))
+            self.app_state.trials_sel =  int(self.app_state.trials[0])
 
   
     def _on_fps_changed(self):
@@ -516,105 +466,125 @@ class DataWidget(QWidget):
             ds = self.app_state.ds.copy(deep=True)
             filtered_trials = ds.trials.where(ds[filter_condition] == int(filter_value), drop=True).values
 
-            self.trials = [trial for trial in original_trials if trial in filtered_trials]
+            self.app_state.trials = [trial for trial in original_trials if trial in filtered_trials]
         else:
             # Reset to all trials
-            self.trials = original_trials
+            self.app_state.trials = original_trials
 
         # Update trials dropdown
-        self.trials_combo.clear()
-        self.trials_combo.addItems([str(int(trial)) for trial in self.trials])
+        self.navigation_widget.trials_combo.clear()
+        self.navigation_widget.trials_combo.addItems([str(int(trial)) for trial in self.app_state.trials])
 
         # Update current trial if needed
-        if self.app_state.trials_sel not in self.trials:
-            if self.trials:
-                self.app_state.trials_sel = int(self.trials[0])
-                self.trials_combo.setCurrentText(str(self.app_state.trials_sel))
+        if self.app_state.trials_sel not in self.app_state.trials:
+            if self.app_state.trials:
+                self.app_state.trials_sel = int(self.app_state.trials[0])
+                self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials_sel))
 
 
-        self.trials_combo.blockSignals(False)
+        self.navigation_widget.trials_combo.blockSignals(False)
         self._update_plot()
 
 
-    # Navigation methods
-    def next_trial(self):
-        """Go to the next trial. Can be called by shortcut."""
-        self._update_trial(1)
-
-    def prev_trial(self):
-        """Go to the previous trial."""
-        self._update_trial(-1)
-
-
-    def _update_trial(self, direction: int):
-        """Navigate to next/previous trial."""
-
-        curr_idx = self.trials.index(self.app_state.trials_sel) 
-        new_trial = self.trials[curr_idx + direction] 
- 
-        if 0 <= new_trial <= max(self.trials):
-            self.app_state.trials_sel = new_trial
-
-            # Update the combo box text without triggering the signal
-            self.trials_combo.blockSignals(True)
-            self.trials_combo.setCurrentText(str(new_trial))
-            self.trials_combo.blockSignals(False)
-
-            # Clear spectrogram buffer when switching trials
-            if hasattr(self, 'lineplot') and self.lineplot is not None:
-                self.lineplot.clear_spectrogram_buffer()
-
-            self._update_video()
-            self._update_plot()  
-
-
-
-
-    def _update_video(self):
-        """Update video display based on current selections."""
-        if not self.app_state.ready:
-            return
-
-        try:
-            file_name = (
-                self.app_state.ds[self.app_state.cameras_sel]
-                .sel(trials=self.app_state.trials_sel)
-                .values.item()
-            )
-            video_path = os.path.join(self.app_state.video_folder, file_name)
-
-            # Remove all previous layers
-            for layer in self.viewer.layers:
-                self.viewer.layers.remove(layer)
-
-            # Open new video
-            self.viewer.open(video_path)
-
-
-
-        except (OSError, AttributeError, ValueError) as e:
-            show_error(f"Error loading video: {e}")
-
-    def _update_plot(self):
+    def _update_plot(self, new_trial: bool = False):
         """Update the line plot with current trial/keypoint/variable selection."""
         if not self.app_state.ready:
             return
 
         try:
-            # Give line plot access to audio player
-            if hasattr(self, "audio_player") and self.audio_player is not None:
-                setattr(self.lineplot, "audio_player", self.audio_player)
-
             self.lineplot.updateLinePlot()
+            # Sync logic removed; handled by AudioVideoSync classes
 
             ds = self.app_state.ds
             ds_kwargs = self.app_state.get_ds_kwargs()
             time_data = ds.time.values
-            labels = ds.sel(**ds_kwargs).labels.values
+
+            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+
+
             self.labels_widget.plot_all_motifs(time_data, labels)
 
         except (KeyError, AttributeError, ValueError) as e:
             show_error(f"Error updating plot: {e}")
+
+
+    def _update_video_audio(self):
+        """Update video and audio if not none."""
+        if not self.app_state.ready or not self.app_state.video_folder:
+            return
+        self.navigation_widget.slider_clicks_enabled = False
+
+        # Remove all previous layers
+        for layer in self.viewer.layers:
+            self.viewer.layers.remove(layer)
+
+
+        video_file = (
+            self.app_state.ds[self.app_state.cameras_sel]
+            .sel(trials=self.app_state.trials_sel)
+            .values.item()
+        )
+
+        video_path = os.path.join(self.app_state.video_folder, video_file)
+        self.app_state.video_path = os.path.normpath(video_path)
+
+        if self.app_state.audio_folder:
+            # Optional 
+            audio_file = (
+                self.app_state.ds[self.app_state.mics_sel]
+                .sel(trials=self.app_state.trials_sel)
+                .values.item()
+            )
+
+            audio_path = os.path.join(self.app_state.audio_folder, audio_file)
+            self.app_state.audio_path = os.path.normpath(audio_path)
+
+
+
+        # Timeline display with number of frames
+        cap = cv2.VideoCapture(self.app_state.video_path)
+        self.app_state.num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        self.navigation_widget.time_slider.setMinimum(0)
+        self.navigation_widget.time_slider.setMaximum(self.app_state.num_frames - 1)
+        self.navigation_widget.slider_clicks_enabled = True
+ 
+ 
+        self.app_state.stream = VideoAudioStreamViewer(
+            viewer=self.viewer,
+            app_state=self.app_state,
+            video_source=self.app_state.video_path,
+            audio_source=self.app_state.audio_path,
+            enable_audio=True if self.app_state.audio_path else False,
+        )
+        
+        self.app_state.stream.start() # so user sees that video loaded
+        self.app_state.stream.pause()
+
+    def toggle_play_pause(self):
+        """Toggle play/pause state of the video/audio stream."""
+        if not self.app_state.stream:
+            return
+        
+        if self.app_state.stream.is_paused:
+            self.app_state.stream.resume()
+        else:
+            self.app_state.stream.pause()
+
+
+    def closeEvent(self, event):
+        """Handle widget close event with proper cleanup."""
+        # Cleanup any dta loader etc
+        
+        
+       # Stop video/audio stream if it exists
+        if hasattr(self.app_state, 'stream') and self.app_state.stream:
+            self.app_state.stream.stop()
+
+        super().closeEvent(event)
+
+
+
 
     def _on_plot_spectrogram_changed(self, _state=None):
         """Handle spectrogram checkbox state change."""
@@ -625,24 +595,6 @@ class DataWidget(QWidget):
             self.lineplot.clear_spectrogram_buffer()
             
         self._update_plot()
-
-
-    def _connect_video_audio(self):
-        # Connect video to audio            
-        if self.audio_player is not None:
-            qt_dims = self.viewer.window._qt_viewer.dims
-            qt_dims._animation_thread.started.connect(self._on_napari_play_started)
-            qt_dims._animation_thread.finished.connect(self._on_napari_play_stopped)
-
-
-    def _on_napari_play_started(self):
-        if self.audio_player:
-            self.audio_player._start_playback()
-
-
-    def _on_napari_play_stopped(self):
-        if self.audio_player:
-            self.audio_player._stop_playback()
 
 
 

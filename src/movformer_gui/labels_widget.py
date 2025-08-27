@@ -3,7 +3,7 @@
 import time as _time
 from pathlib import Path
 from typing import Any
-
+import napari
 import numpy as np
 from matplotlib.patches import Rectangle
 from napari.viewer import Viewer
@@ -22,7 +22,14 @@ from qtpy.QtWidgets import (
 )
 
 from file_utils import load_motif_mapping
+
 from label_utils import snap_to_nearest_changepoint
+from xarray_utils import sel_valid
+import cv2
+import time
+from audioio import play
+import random
+
 
 
 class LabelsWidget(QWidget):
@@ -33,7 +40,7 @@ class LabelsWidget(QWidget):
         self.viewer = napari_viewer
         self.app_state = app_state
         self.lineplot = None  # Will be set after creation
-        self.data_widget = None  # Will be set via set_data_widget()
+
 
         # Make widget focusable for keyboard events
         self.setFocusPolicy(Qt.StrongFocus)
@@ -212,19 +219,16 @@ class LabelsWidget(QWidget):
 
         # Delete button
         self.delete_button = QPushButton("Delete (D)")
-        self.delete_button.setShortcut("D")
         self.delete_button.clicked.connect(self._delete_motif)
         layout.addWidget(self.delete_button)
 
         # Edit button
         self.edit_button = QPushButton("Edit (E)")
-        self.edit_button.setShortcut("E")
         self.edit_button.clicked.connect(self._edit_motif)
         layout.addWidget(self.edit_button)
 
         # Play button
-        self.play_button = QPushButton("Play (V)")
-        self.play_button.setShortcut("V")
+        self.play_button = QPushButton("Play (Right-click)")
         self.play_button.clicked.connect(self._play_segment)
         layout.addWidget(self.play_button)
 
@@ -300,8 +304,11 @@ class LabelsWidget(QWidget):
 
         # Get current data from app_state
         ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
+        
+        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
+
+        
         if event.button == 1 and not self.ready_for_click:
             # Select motif -> Then can delete or edit.
             self._check_motif_click(x_clicked, labels)
@@ -388,7 +395,8 @@ class LabelsWidget(QWidget):
 
         # Get current labels from app_state
         ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
+        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+
 
         start_idx = self.first_click
         end_idx = self.second_click
@@ -409,7 +417,7 @@ class LabelsWidget(QWidget):
         self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
         # Update plot
-        time_data = self.app_state.ds.sel(**ds_kwargs).time.values
+        time_data  = self.app_state.ds.time.values
         self.plot_all_motifs(time_data, labels)
 
     def _delete_motif(self):
@@ -421,7 +429,8 @@ class LabelsWidget(QWidget):
 
         # Get current labels from app_state
         ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
+        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+
 
         # Clear labels in the selected range (set to 0)
         labels[start : end + 1] = 0
@@ -434,7 +443,7 @@ class LabelsWidget(QWidget):
         self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
         # Update plot
-        time_data = self.app_state.ds.sel(**ds_kwargs).time.values
+        time_data  = self.app_state.ds.time.values
         self.plot_all_motifs(time_data, labels)
 
     def _edit_motif(self):
@@ -447,8 +456,10 @@ class LabelsWidget(QWidget):
 
         # Get current labels from app_state
         ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = self.app_state.ds.sel(**ds_kwargs).labels.values
+        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
+        
+        
         # Clear labels in the selected range (set to 0)
         labels[old_start : old_end + 1] = 0
 
@@ -463,42 +474,33 @@ class LabelsWidget(QWidget):
         self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
         # Update plot
-        time_data = self.app_state.ds.sel(**ds_kwargs).time.values
+        time_data  = self.app_state.ds.time.values
         self.plot_all_motifs(time_data, labels)
 
-    def _set_frame(self, frame_idx: int) -> bool:
-        """Set the current frame in the napari viewer."""
-        self.viewer.dims.set_current_step(0, frame_idx)
-        return True
-
-    def _play_segment(self) -> bool:
-        """Play a segment of the video between start and end times using the viewer.
-        Can be interrupted by calling this method again.
-        """
-     
-
-        qt_dims = self.viewer.window._qt_viewer.dims
-
-        # Toggle behavior: if already playing, stop
-        try:
-            is_playing = not qt_dims._animation_thread._waiter.is_set()
-        except RuntimeError:
-            is_playing = False
+    
+    
+    def _play_segment(self):
         
-        if is_playing:
-            qt_dims.stop()
-            return False
+        if not self.current_motif_id or len(self.current_motif_pos) != 2:
+            return
 
-        # Validate selection
-        if not self.current_motif_pos:
-            return False
+        self.app_state.current_frame = round(self.current_motif_pos[0])
 
-        start_frame, end_frame = self.current_motif_pos[0], self.current_motif_pos[1]
-        if start_frame >= end_frame:
-            return False
+        start_time = self.current_motif_pos[0] / self.app_state.ds.fps
+        end_time = self.current_motif_pos[1] / self.app_state.ds.fps
+        print(f"Playing motif {self.current_motif_id} from {start_time:.2f}s to {end_time:.2f}s")
 
-        # Start playback of the selected interval
-        fps_value = self.app_state.fps_playback if self.app_state.fps_playback is not None else 30
-        self._set_frame(start_frame)
-        qt_dims.play(axis=0, fps=float(fps_value), loop_mode="once", frame_range=(int(start_frame), int(end_frame)))
-        return True
+
+        # Resume if paused before jumping
+        if self.app_state.stream.is_paused:
+            self.app_state.stream.resume()
+        
+        # Sync with audio via pyav
+        if self.app_state.video_path and self.app_state.audio_path:
+            self.app_state.stream.jump_to_segment(start_time, end_time)
+
+
+        # Video only
+        elif not self.app_state.audio_path:
+            self.app_state.stream.jump_to_segment(start_time, end_time)
+

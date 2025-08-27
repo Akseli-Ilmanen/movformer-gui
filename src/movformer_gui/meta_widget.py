@@ -5,13 +5,16 @@ from pathlib import Path
 from napari.layers import Image
 from napari.viewer import Viewer
 from qt_niu.collapsible_widget import CollapsibleWidgetContainer
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QSlider
 
-from movformer_gui.app_state import ObservableAppState
-from movformer_gui.data_widget import DataWidget
-from movformer_gui.labels_widget import LabelsWidget
-from movformer_gui.lineplot import LinePlot
-from movformer_gui.plot_widgets import PlotsWidget
-from movformer_gui.shortcuts_dialog import ShortcutsWidget
+from .app_state import ObservableAppState
+from .data_widget import DataWidget
+from .labels_widget import LabelsWidget
+from .lineplot import LinePlot
+from .navigation_widget import NavigationWidget
+from .plot_widgets import PlotsWidget
+from .shortcuts_dialog import ShortcutsWidget
+from qtpy.QtWidgets import QLabel, QHBoxLayout
 
 
 class MetaWidget(CollapsibleWidgetContainer):
@@ -36,7 +39,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         self._create_widgets(napari_viewer)
 
 
-        self.collapsible_widgets[0].expand()
+        self.collapsible_widgets[1].expand()
 
 
         self._bind_global_shortcuts(napari_viewer, self.labels_widget, self.data_widget)
@@ -44,27 +47,77 @@ class MetaWidget(CollapsibleWidgetContainer):
 
     def _create_widgets(self, napari_viewer: Viewer):
         """Create all widgets with app_state passed to each one."""
-        # Initialize LinePlot early (empty) and add to napari
+
+
+      
+        # Create a vertical container for both slider and lineplot
+        slider_lineplot_container = QWidget()
+        container_layout = QVBoxLayout()
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Time slider and label
+
+        time_slider = QSlider()
+        time_label = QLabel("0 / 0")
+
+        # Place slider and label in a horizontal layout
+        slider_layout = QHBoxLayout()
+        slider_layout.setContentsMargins(0, 0, 0, 0)
+        slider_layout.setSpacing(20)
+        slider_layout.addWidget(time_slider)
+        slider_layout.addWidget(time_label)
+        container_layout.addLayout(slider_layout)
+
+        # LinePlot widget
         self.lineplot = LinePlot(napari_viewer, self.app_state)
-        napari_viewer.window.add_dock_widget(self.lineplot, area="bottom")
-        # Avoid forcing geometry; cap height instead
-        self.lineplot.setMaximumHeight(400)
+        container_layout.addWidget(self.lineplot)
+
+        slider_lineplot_container.setLayout(container_layout)
+
+        # Add the combined container docked at bottom
+        napari_viewer.window.add_dock_widget(slider_lineplot_container, area="bottom")
 
         # Create all widgets with app_state
-        self.plots_widget = PlotsWidget(self.app_state)
+        self.plots_widget = PlotsWidget(napari_viewer, self.app_state)
         self.labels_widget = LabelsWidget(napari_viewer, self.app_state)
         self.shortcuts_widget = ShortcutsWidget(self.app_state)
+        self.navigation_widget = NavigationWidget(napari_viewer, self.app_state, time_slider=time_slider, time_label=time_label)
         self.data_widget = DataWidget(napari_viewer, self.app_state, self)
+        
+        
+        # Set navigation_widget reference in app_state for property callback
+        self.app_state.navigation_widget = self.navigation_widget
+
+
+
+                
 
         # Set up cross-references between widgets, so they can talk to each other
-        self.plots_widget.set_lineplot(self.lineplot)
-        self.plots_widget.set_labels_widget(self.labels_widget)
-        self.plots_widget.set_data_widget(self.data_widget)
+
+            
+        # Needs data widget for updating plots after navigation
+        self.navigation_widget.set_data_widget(self.data_widget)
+        
+
+        # Labels and plot widgets need lineplot read info (e.g. xClicked) and apply plotting
         self.labels_widget.set_lineplot(self.lineplot)
-        self.lineplot.set_plots_widget(self.plots_widget)
-        self.data_widget.set_references(self.lineplot, self.labels_widget, self.plots_widget)
+        self.plots_widget.set_lineplot(self.lineplot)
+        
+        
+        # The one widget to rule them all (loading data, updating plots, managing sync)
+        self.data_widget.set_references(self.lineplot, self.labels_widget, self.plots_widget, self.navigation_widget)
+        
 
         # Add widgets to collapsible container
+        self.add_widget(
+            self.shortcuts_widget,
+            collapsible=True,
+            widget_title="Shortcuts and Help",  # Add explain images and helpful GitHub links
+        )
+        
+        
+        
         self.add_widget(
             self.data_widget,
             collapsible=True,
@@ -80,12 +133,15 @@ class MetaWidget(CollapsibleWidgetContainer):
         self.add_widget(
             self.plots_widget,
             collapsible=True,
-            widget_title="Plotting and navigation",
+            widget_title="Plotting controls",
         )
 
+
+        
         self.add_widget(
-            self.shortcuts_widget,
-            widget_title="Shortcuts & Help", # Add explain images and helpful GitHub links
+            self.navigation_widget,
+            collapsible=True,
+            widget_title="Navigation controls",
         )
 
     def closeEvent(self, event):
@@ -108,15 +164,26 @@ class MetaWidget(CollapsibleWidgetContainer):
     def _bind_global_shortcuts(self, viewer, labels_widget, data_widget):
         """Bind all global shortcuts using napari's @viewer.bind_key syntax."""
 
-        
-        
+
+        # Manually unbind previous keys.
+        Image.bind_key("1", None)
+        Image.bind_key("2", None)
+        Image.bind_key("space", None)
+
+
+        # Pause/play video/audio
+        @viewer.bind_key("space", overwrite=True)
+        def toggle_play_pause(v):
+            self.data_widget.toggle_play_pause()
+
+
         @viewer.bind_key("m", overwrite=True)
         def next_trial(v):
-            data_widget.next_trial()
+            self.navigation_widget.next_trial()
 
         @viewer.bind_key("n", overwrite=True)
         def prev_trial(v):
-            data_widget.prev_trial()
+            self.navigation_widget.prev_trial()
 
         # Arrow key plot navigation
         @viewer.bind_key("Up", overwrite=True)
@@ -151,9 +218,6 @@ class MetaWidget(CollapsibleWidgetContainer):
         def adjust_window_larger(v):
             self.plots_widget._adjust_window_size(1.2)  # Make window 20% larger
 
-        # Manually unbind previous keys.
-        Image.bind_key("1", None)
-        Image.bind_key("2", None)
 
         # Motif labeling (0-9, q, w, r, t)
         for key, motif_key in zip(

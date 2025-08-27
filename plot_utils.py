@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from xarray_utils import sel_valid
 
 def get_motif_colours(seed=9):
     # cmap_names = ['tab20']
@@ -83,19 +84,25 @@ def plot_ds_variable(ax, ds, ds_kwargs, variable, color_variable=None):
     Plot a variable from ds for a given trial and keypoint.
     Handles both multi-dimensional (e.g., pos, vel) and single-dimensional (e.g., speed) variables.
 
-    e.g. ds_kwargs: {trials=20, keypoints="beakTip", individual="Freddy"}
+    e.g. ds_kwargs: {trials=20, keypoints="beakTip", individuals="Freddy"}
 
     """
     # Use ds.sel for direct selection
     var = ds[variable]
     time = ds["time"].values
 
-    data = var.sel(**ds_kwargs).values
-
+    
+    data = sel_valid(var, ds_kwargs) 
+    
+    
     # (time, XX), e.g. (time, space)
     if data.ndim == 2:
-        XX_var = var.sel(**ds_kwargs).dims[-1]
-        coord_labels = list(ds[XX_var].values)
+
+        valid_keys = set(data.coords)
+        filt_kwargs = {k: v for k, v in ds_kwargs.items() if k in valid_keys}
+
+        coord_dims = var.sel(**filt_kwargs).dims[-1]
+        coord_labels = list(ds[coord_dims].values)
         ax = plot_multidim(ax, time, data, coord_labels=coord_labels)
 
     # (time, )
@@ -107,10 +114,9 @@ def plot_ds_variable(ax, ds, ds_kwargs, variable, color_variable=None):
         for v in ds.data_vars:
             if v == color_variable and ds.attrs["plotColors"] == variable:
 
-                color_data = ds[v].sel(**ds_kwargs).values
-                
-        
-        if ds.attrs["plotChangepoints"] == variable:
+                color_data = sel_valid(ds[v], ds_kwargs)
+          
+        if hasattr(ds, "plotChangepoints") and ds.attrs["plotChangepoints"] == variable:
             changepoints = ds["changepoints"].sel(**ds_kwargs).values
 
         ax = plot_singledim(ax, time, data, color_data=color_data, changepoints=changepoints)
@@ -119,13 +125,14 @@ def plot_ds_variable(ax, ds, ds_kwargs, variable, color_variable=None):
         print(f"Variable '{variable}' not supported for plotting.")
 
 
-    boundary_events_raw = ds["boundary_events"].sel(trials=ds_kwargs["trials"]).values
-    valid_events = boundary_events_raw[~np.isnan(boundary_events_raw)]
-    eventsIdxs = valid_events.astype(int)
-    eventsIdxs = eventsIdxs[(eventsIdxs >= 0) & (eventsIdxs < len(time))]
-    
-    for event in eventsIdxs:
-        ax.axvline(x=time[event], color='k')
+    if hasattr(ds, "boundary_events"):
+        boundary_events_raw = ds["boundary_events"].sel(trials=ds_kwargs["trials"]).values
+        valid_events = boundary_events_raw[~np.isnan(boundary_events_raw)]
+        eventsIdxs = valid_events.astype(int)
+        eventsIdxs = eventsIdxs[(eventsIdxs >= 0) & (eventsIdxs < len(time))]
+        
+        for event in eventsIdxs:
+            ax.axvline(x=time[event], color='k')
 
 
     ylabel = var.attrs.get("ylabel", variable)
