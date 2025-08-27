@@ -74,6 +74,7 @@ class NavigationWidget(QWidget):
 
 
 
+
     def set_data_widget(self, data_widget):
         self.data_widget = data_widget
         

@@ -60,6 +60,7 @@ class MetaWidget(CollapsibleWidgetContainer):
 
         time_slider = QSlider()
         time_label = QLabel("0 / 0")
+        time_label.setToolTip("Current frame / All frames")
 
         # Place slider and label in a horizontal layout
         slider_layout = QHBoxLayout()
@@ -88,6 +89,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         
         # Set navigation_widget reference in app_state for property callback
         self.app_state.navigation_widget = self.navigation_widget
+        self.app_state.lineplot = self.lineplot
 
 
 

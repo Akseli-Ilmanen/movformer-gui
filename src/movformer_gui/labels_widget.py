@@ -480,15 +480,20 @@ class LabelsWidget(QWidget):
     
     
     def _play_segment(self):
-        
+
+        if not self.app_state.sync_state == 'lineplot_to_video':
+            return 
+
         if not self.current_motif_id or len(self.current_motif_pos) != 2:
             return
 
-        self.app_state.current_frame = round(self.current_motif_pos[0])
 
         start_time = self.current_motif_pos[0] / self.app_state.ds.fps
         end_time = self.current_motif_pos[1] / self.app_state.ds.fps
-        print(f"Playing motif {self.current_motif_id} from {start_time:.2f}s to {end_time:.2f}s")
+        
+        self.app_state.current_frame = round(self.current_motif_pos[0])
+        self.app_state.current_time = start_time
+
 
 
         # Resume if paused before jumping

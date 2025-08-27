@@ -40,7 +40,6 @@ class AppStateSpec:
         "spec_buffer": (float | None, None, True, float),
         "video_buffer_size": (int, 300, True, int),  # Number of frames to buffer
         "plot_spectrogram": (bool, False, True, bool),
-        "audio_volume": (int, 50, True, int),
         "ready": (bool, False, False, bool),
         "trials_sel_condition_value": (str | None, None, True, object),
         "nfft": (int, 1024, True, int),
@@ -120,6 +119,13 @@ class ObservableAppState(QObject):
                 self.settings.application.playback_fps = value
             if name == "current_frame" and getattr(self, "navigation_widget", None) is not None:
                 self.navigation_widget.update_slider()
+ 
+                if (
+                    hasattr(self, 'sync_state')
+                    and self.sync_state == "video_to_lineplot"
+                    and hasattr(self, 'lineplot')
+                ):
+                    self.lineplot.request_sync_update()
             return
         super().__setattr__(name, value)
         

@@ -21,12 +21,9 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 
-from .data_loader import (
-    VIDEO_EXTENSIONS,
-    load_dataset,
-    validate_media_folder,
-)
+from .data_loader import load_dataset
 from .video_audio_streamer import VideoAudioStreamViewer
+from .audio_cache import SharedAudioCache
 from xarray_utils import sel_valid
 import napari
 
@@ -72,7 +69,6 @@ class DataWidget(QWidget):
 
         self._create_path_folder_widgets()
         self._create_load_button()
-        self._create_audio_volume_slider()
 
         # Restore UI text fields from app state
         if self.app_state.file_path:
@@ -154,23 +150,6 @@ class DataWidget(QWidget):
         
     
 
-    def _create_audio_volume_slider(self):
-        """Create and add audio volume slider below microphones selection."""
-        self.volume_layout = QHBoxLayout()
-        self.volume_layout.addWidget(QLabel("Vol:"))
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        
-        self.volume_slider.setValue(self.app_state.get_with_default("audio_volume"))
-        self.volume_slider.setToolTip("Adjust playback volume")
-        self.volume_slider.valueChanged.connect(self._on_volume_changed)
-        self.volume_layout.addWidget(self.volume_slider, stretch=1)
-        self.layout().addRow(self.volume_layout)
-
-    def _on_volume_changed(self, value: int) -> None:
-        """Update playback volume in real time if playing."""
-        self.app_state.audio_volume = value
-
 
 
     def on_browse_clicked(self, browse_type: str = "file", media_type: str | None = None):
@@ -195,33 +174,27 @@ class DataWidget(QWidget):
             self.app_state.file_path = file_path
 
         elif browse_type == "folder":
-            caption = "Select folder containing "
             if media_type == "video":
-                caption += f"video files ({' '.join(VIDEO_EXTENSIONS)})"
+                caption = f"Open folder with video files (e.g. mp4, mov)."
             elif media_type == "audio":
-                caption += "audio files"
-                
+                caption = f"Open folder with audio files (e.g. wav, mp3, mp4)."
+
             folder_path = QFileDialog.getExistingDirectory(None, caption=caption)
 
 
-
-            if media_type == "video" and validate_media_folder(folder_path, "video"):
+            if media_type == "video":
                 self.video_folder_edit.setText(folder_path)
                 self.app_state.video_folder = folder_path
-            elif media_type == "audio" and validate_media_folder(folder_path, "audio"):
+            elif media_type == "audio":
                 self.audio_folder_edit.setText(folder_path)
                 self.app_state.audio_folder = folder_path
                 self.clear_audio_checkbox.setChecked(False)
-            else:
-                raise ValueError(
-                    f"Selected folder does not contain valid {media_type} files or is empty."
-                )
+
+
 
     def on_load_clicked(self):
         """Load the file and show line plot in napari dock."""
         self.setVisible(False)
-
-
 
         # Load ds
         file_path = self.file_path_edit.text()        
@@ -310,7 +283,7 @@ class DataWidget(QWidget):
         # Add spectrogram checkbox
         self.plot_spec_checkbox = QCheckBox("Plot spectrogram")
         self.plot_spec_checkbox.setChecked(bool(getattr(self.app_state, "plot_spectrogram", False)))
-        self.plot_spec_checkbox.stateChanged.connect(self._on_plot_spectrogram_changed)
+        self.plot_spec_checkbox.stateChanged.connect(self._on_plot_spec_checkbox_changed)
         self.layout().addRow(self.plot_spec_checkbox)
         self.controls.append(self.plot_spec_checkbox)
 
@@ -573,11 +546,11 @@ class DataWidget(QWidget):
 
 
     def closeEvent(self, event):
-        """Handle widget close event with proper cleanup."""
-        # Cleanup any dta loader etc
+        """Clean up video stream and data cache."""
+
+
+        SharedAudioCache.clear_cache()
         
-        
-       # Stop video/audio stream if it exists
         if hasattr(self.app_state, 'stream') and self.app_state.stream:
             self.app_state.stream.stop()
 
@@ -586,13 +559,13 @@ class DataWidget(QWidget):
 
 
 
-    def _on_plot_spectrogram_changed(self, _state=None):
+    def _on_plot_spec_checkbox_changed(self):
         """Handle spectrogram checkbox state change."""
         self.app_state.plot_spectrogram = bool(self.plot_spec_checkbox.isChecked())
         
-        # Clear spectrogram buffer when switching plot modes
-        if hasattr(self, 'lineplot') and self.lineplot is not None:
+        if self.lineplot is not None:
             self.lineplot.clear_spectrogram_buffer()
+            self.lineplot.updateLinePlot()
             
         self._update_plot()
 

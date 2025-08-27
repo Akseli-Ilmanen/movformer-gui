@@ -9,7 +9,9 @@ import queue
 import time
 from typing import Optional, Union
 import pyaudio 
-    
+from napari.utils.notifications import show_error
+
+
 class VideoAudioStreamViewer:
     """
     Methods:
@@ -83,35 +85,34 @@ class VideoAudioStreamViewer:
     def initialize_streams(self):
         """Initialize video and audio streams"""
 
-        # Open video container
-        self.video_container = av.open(self.video_source)
+        try:
+            self.video_container = av.open(self.video_source)
+        except Exception as e:
+            show_error(f"The folder {self.app_state.video_folder} does not seem to contain any video files (e.g. mp4, mov). See error: {e}")
+            raise
         self.video_stream = self.video_container.streams.video[0]
         self.frame_time_playback = 1.0 / self.app_state.fps_playback
         self.total_duration = float(self.video_stream.duration * self.video_stream.time_base)
         
-        # Initialize audio if enabled
+
         if self.enable_audio:
             if self.audio_source:
-                # Separate audio file
-                self.audio_container = av.open(self.audio_source)
+                try:
+                    self.audio_container = av.open(self.audio_source)
+                except Exception as e:
+                    show_error(f"The folder {self.app_state.audio_folder} does not seem to contain any audio files (e.g. wav, mp3, mp4). See error: {e}")
+                    raise
             else:
-                # Try to get audio from video file
-                audio_streams = [s for s in self.video_container.streams 
-                                if s.type == 'audio']
-                if audio_streams:
-                    self.audio_container = self.video_container
-                    self.audio_stream = audio_streams[0]
-                    
-            if self.audio_container and (self.audio_stream or 
-                                        any(s.type == 'audio' for s in self.audio_container.streams)):
-                if not self.audio_stream:
-                    self.audio_stream = [s for s in self.audio_container.streams 
-                                       if s.type == 'audio'][0]
-                    
+                self.audio_container = None
+
+
+            self.audio_stream = self.audio_container.streams.audio[0] if self.audio_container else None
+
+            if self.audio_stream:
                 self.audio_sample_rate = self.audio_stream.sample_rate
                 self.audio_channels = self.audio_stream.channels
-                
-                # Initialize PyAudio
+
+ 
                 self.audio_player = pyaudio.PyAudio()
                 self.audio_output = self.audio_player.open(
                     format=pyaudio.paInt16,
@@ -120,7 +121,7 @@ class VideoAudioStreamViewer:
                     output=True,
                     frames_per_buffer=self.audio_buffer_size
                 )
-    
+
     def start(self):
         """Start streaming video (and audio if enabled) to napari"""
         self.initialize_streams()
@@ -134,27 +135,27 @@ class VideoAudioStreamViewer:
                 name='Video Stream'
             )
         
-        # Start playback
+
         self.is_running = True
         self.start_time = time.time()
         
-        # Start the decoding thread
+
         self.decode_thread = threading.Thread(target=self._decode_frames)
         self.decode_thread.daemon = True
         self.decode_thread.start()
         
-        # Start audio thread if enabled
+
         if self.enable_audio and self.audio_stream:
             self.audio_thread = threading.Thread(target=self._play_audio)
             self.audio_thread.daemon = True
             self.audio_thread.start()
         
-        # Start the timer to update display
+
         self.timer.start(int(self.frame_time_playback * 1000))  # Convert to milliseconds
     
     def _get_frame_at_position(self, position_seconds: float):
         """Get a single frame at specific position"""
-        # Seek to position
+
         seek_target = int(position_seconds / self.video_stream.time_base)
         self.video_container.seek(seek_target, stream=self.video_stream)
         
@@ -172,11 +173,11 @@ class VideoAudioStreamViewer:
                     while not self.frame_queue.empty():
                         self.frame_queue.get()
                     
-                    # Seek to requested position
+
                     seek_target = int(self.seek_position / self.video_stream.time_base)
                     self.video_container.seek(seek_target, stream=self.video_stream)
                     
-                    # Update timing
+
                     self.current_position = self.seek_position
                     self.start_time = time.time() - self.seek_position
                     self.accumulated_pause_time = 0
@@ -196,13 +197,12 @@ class VideoAudioStreamViewer:
                         break
                         
                     for frame in packet.decode():
-                        # Get frame timestamp
                         frame_time = float(frame.pts * self.video_stream.time_base)
                         
-                        # Convert frame to numpy array
+
                         img = frame.to_ndarray(format='rgb24')
                         
-                        # Add frame with timestamp to queue
+
                         try:
                             self.frame_queue.put((img, frame_time), timeout=0.1)
                         except queue.Full:
@@ -216,7 +216,12 @@ class VideoAudioStreamViewer:
                                 time.sleep(min(frame_time - elapsed, 0.1))
                                 
             except Exception as e:
-                print(f"Decoding error: {e}")
+                codec_name = getattr(self.video_stream.codec_context, 'name', None)
+                if codec_name == 'av1':
+                    show_error(f"Your video file encoding is in AV1 format. The library PYAV does not reliably encode this. By encoding your videos in H.264 format, you may achieve better compatibility.")
+                else:
+                    print(f"Decoding error: {e}")
+
                 break
     
     def _play_audio(self):
@@ -250,7 +255,6 @@ class VideoAudioStreamViewer:
                         break
                         
                     for frame in packet.decode():
-                        # Convert to bytes
                         audio_data = frame.to_ndarray().astype(np.int16).tobytes()
                         
                         # Play audio
@@ -271,6 +275,9 @@ class VideoAudioStreamViewer:
                     self.current_position = timestamp
                     self.app_state.current_time = timestamp
                     self.app_state.current_frame = round(self.app_state.current_time * self.app_state.ds.fps)
+                    
+   
+            
         except queue.Empty:
             pass
     
@@ -288,6 +295,11 @@ class VideoAudioStreamViewer:
             
         self.seek_position = position
         self.seek_requested = True
+
+        self.app_state.current_time = self.seek_position
+        self.app_state.current_frame = round(self.app_state.current_time * self.app_state.ds.fps)
+    
+            
         
         # Wait a bit for seek to process
         time.sleep(0.1)

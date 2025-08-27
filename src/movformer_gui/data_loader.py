@@ -1,28 +1,12 @@
 """Data loading utilities for the movformer GUI."""
 
-import os
+
 import xarray as xr
 import numpy as np
 from typing import Optional, Tuple
 from pathlib import Path
 from napari.utils.notifications import show_error
-from audioio import AudioLoader
 
-# Supported file types for loading.
-SUPPORTED_EXTENSIONS = ['.nc'] # for dataset file
-VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv']
-AUDIO_EXTENSIONS = ['.wav', '.flac', '.mp3', '.ogg', '.m4a']
-
-    
-
-def get_audio_block(loader: AudioLoader, start_time: float, duration: float) -> Optional[np.ndarray]:
-    """Get a block of audio data from loader starting at start_time for duration (in seconds)."""
-    if loader is None:
-        return None
-    sr = loader.rate
-    start_sample = int(start_time * sr)
-    end_sample = int(min(start_sample + duration * sr, loader.frames))
-    return loader[start_sample:end_sample]
 
 
 
@@ -34,16 +18,24 @@ def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
     """
 
     # Check file extension
-    if Path(file_path).suffix not in SUPPORTED_EXTENSIONS:
-        error_msg = f"Unsupported file type: {Path(file_path).suffix}. Supported types: {SUPPORTED_EXTENSIONS}"
+    if Path(file_path).suffix != '.nc':
+        error_msg = (
+            f"Unsupported file type: {Path(file_path).suffix}. Expected .nc file.\n"
+            "See documentation:\n"
+            "https://movement.neuroinformatics.dev/user_guide/input_output.html#native-saving-and-loading-with-netcdf"
+        )
         show_error(error_msg)
         return None, None
 
     ds = xr.open_dataset(file_path)
 
-    # Check minimum required coordinates
+    # Check minimum required coordinates and variables
     required_coords = ['trials', 'time']
     missing_coords = [coord for coord in required_coords if coord not in ds.coords]
+    if missing_coords:
+        error_msg = f"Dataset missing required coordinates: {missing_coords}"
+        show_error(error_msg)
+        return None, None
 
     required_vars = ["labels"]
     missing_vars = [var for var in required_vars if var not in ds.data_vars]
@@ -55,13 +47,12 @@ def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
     if not hasattr(ds, "fps"):
         show_error("Dataset must have 'fps' attribute for video processing.")
 
+
+
     # Initialize info dictionary to categorize variables by type
-
-
     name_info = {}
     data_info = {}
 
-    
 
 
 
@@ -236,27 +227,4 @@ def validate_dataset_types(ds: xr.Dataset, info: dict) -> bool:
         return False
     
     return True
-
-def validate_media_folder(folder_path: str, media_type: str) -> bool:
-    """Validate that the folder exists and contains files with given media type extensions.
-    Args:
-        folder_path: Path to the folder.
-        media_type: 'video' or 'audio'.
-    Returns:
-        True if folder contains at least one file with the specified media type extension.
-    """
-    if not folder_path or not os.path.exists(folder_path):
-        return False
-    folder = Path(folder_path)
-    if media_type == 'video':
-        extensions = VIDEO_EXTENSIONS
-    elif media_type == 'audio':
-        extensions = AUDIO_EXTENSIONS
-    else:
-        extensions = []
-    for ext in extensions:
-        if list(folder.glob(f'*{ext}')):
-            return True
-    return False
-
 

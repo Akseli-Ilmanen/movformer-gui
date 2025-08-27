@@ -3,60 +3,30 @@
 import numpy as np
 from scipy.signal import spectrogram
 from matplotlib.patches import Rectangle
-from audioio import AudioLoader
+from .audio_cache import SharedAudioCache
+
 
 class BufferedSpectrogram:
-
     """Buffered spectrogram that maintains a larger time window and only recomputes when needed.
     
-    This class implements a smart buffering system inspired by the BufferedArray class from audioio.
-    It maintains a larger time window (typically 5x the display window) and only recomputes the
-    spectrogram when the view moves significantly beyond the current buffer.
-    
-    The buffering system works as follows:
-    1. When plotting, it calculates a buffer range that is `buffer_multiplier` times larger than
-       the requested display range
-    2. If the requested range is within the current buffer, it reuses the cached data
-    3. If the requested range extends beyond the buffer by more than `recompute_threshold` 
-       fraction of the buffer size, it recomputes the entire buffer
-    4. The buffer is centered around the requested range to minimize recomputation
-    
-    This approach provides smooth navigation while maintaining good performance by avoiding
-    unnecessary recomputation of spectrogram data.
-    
-    Parameters
-    ----------
-    nfft : int
-        FFT size / window length.
-    hop_frac : float
-        Hop as fraction of nfft (noverlap = nfft - hop).
-    vmin_db : float
-        Minimum dB for display.
-    vmax_db : float
-        Maximum dB for display.
-    buffer_multiplier : float
-        Buffer size as multiple of display window size (default: 5.0).
-        A value of 5.0 means the buffer will be 5x larger than the display window.
-    recompute_threshold : float
-        Fraction of buffer size that triggers recomputation (default: 0.5).
-        When the requested range extends beyond the buffer by more than this fraction,
-        the entire buffer is recomputed.
+    This class implements a smart buffering system that maintains a larger time window 
+    (typically 5x the display window) and only recomputes when the view moves significantly 
+    beyond the current buffer.
     """
     
-    
-    def __init__(self, app_state, nfft: int = None, hop_frac: float = None, 
-                 vmin_db: float = None, vmax_db: float = None,
-                 buffer_multiplier: float = None, recompute_threshold: float = None):
+    def __init__(self, app_state, nfft=None, hop_frac=None, 
+                 vmin_db=None, vmax_db=None,
+                 buffer_multiplier=None, recompute_threshold=None):
         
         # Use app_state for all defaults
         self.app_state = app_state
         
-        nfft = nfft if nfft is not None else app_state.get_with_default("nfft")
-        hop_frac = hop_frac if hop_frac is not None else app_state.get_with_default("hop_frac")
-        vmin_db = vmin_db if vmin_db is not None else app_state.get_with_default("vmin_db")
-        vmax_db = vmax_db if vmax_db is not None else app_state.get_with_default("vmax_db")
-        buffer_multiplier = buffer_multiplier if buffer_multiplier is not None else app_state.get_with_default("buffer_multiplier")
-        recompute_threshold = recompute_threshold if recompute_threshold is not None else app_state.get_with_default("recompute_threshold")
+        nfft = app_state.get_with_default("nfft")
+        hop_frac = app_state.get_with_default("hop_frac")
+        vmin_db = app_state.get_with_default("vmin_db")
+        vmax_db = app_state.get_with_default("vmax_db")
+        buffer_multiplier = app_state.get_with_default("buffer_multiplier")
+        recompute_threshold = app_state.get_with_default("recompute_threshold")
 
         if nfft < 8:
             raise ValueError("nfft must be >= 8")
@@ -79,30 +49,11 @@ class BufferedSpectrogram:
         self.buffer_t1 = None  # End time of current buffer
         self.buffer_data = None  # Cached spectrogram data
         self.buffer_extent = None  # Cached extent information
-     
-     
-    
-    def load_audio_file(self, file_path: str, buffer_size: float = None):
-        """
-        Load audio file and return AudioLoader instance.
-        Parameters
-        ----------
-        file_path : str
-            Path to audio file
-        buffer_size : float, optional
-            Buffer size in seconds
-        Returns
-        -------
-        AudioLoader
-        """
-        if buffer_size is None:
-            buffer_size = self.app_state.get_with_default("audio_buffer")
-        loader = AudioLoader(file_path, buffersize=buffer_size)
-        return loader
-
-
         
-    def needs_recompute(self, t0: float, t1: float) -> bool:
+        # Track current audio source
+        self.current_audio_path = None
+        
+    def needs_recompute(self, t0, t1):
         """Check if spectrogram needs to be recomputed for the given time range."""
         if self.buffer_data is None:
             return True
@@ -122,21 +73,28 @@ class BufferedSpectrogram:
             
         return False
         
-    def compute_spectrogram(self, audio_loader, t0: float, t1: float):
-        """Compute spectrogram for the given time range.
+    def compute_spectrogram(self, audio_path, t0, t1):
+        """Compute spectrogram for the given time range using SharedAudioCache.
         
         Parameters
         ----------
-        audio_loader : AudioLoader
-            Audio data loader
+        audio_path : str
+            Path to audio file
         t0 : float
             Start time in seconds  
         t1 : float
             End time in seconds
-        shared_cache : SharedAudioCache, optional
-            Shared audio cache for efficient loading
         """
-        if t1 <= t0 or audio_loader is None:
+        if t1 <= t0 or not audio_path:
+            return None, None
+            
+        # Get cached audio loader
+        audio_loader = SharedAudioCache.get_loader(
+            audio_path, 
+            buffer_size=self.app_state.get_with_default("audio_buffer")
+        )
+        
+        if audio_loader is None:
             return None, None
             
         fs = audio_loader.rate
@@ -146,20 +104,86 @@ class BufferedSpectrogram:
         if i1 - i0 < self.nfft:
             return None, None
             
-        # Load audio data for the time window - use shared cache if available
-        if shared_cache is not None:
-            x = shared_cache.get_audio_segment(audio_loader, t0, t1)
-        else:
-            # Fallback to direct loading
-            x = audio_loader[i0:i1]
-
+        # Load audio data
+        x = audio_loader[i0:i1]
+        
         if x is None:
-            raise ValueError(f"Audio data could not be loaded for the specified time window: {t0} - {t1}")
+            raise ValueError(f"Audio data could not be loaded for time window: {t0} - {t1}")
             
         if x.ndim == 2:  # mixdown if stereo/multi
             x = np.mean(x, axis=1)
+            
+        # Compute spectrogram
+        f, t, Sxx = spectrogram(x, fs=fs, nperseg=self.nfft, 
+                               noverlap=self.nfft - self.hop)
         
-
-        f, t, Sxx = spectrogram(x, fs=fs, nperseg=self.nfft, noverlap=self.nfft // 2)
-
-
+        # Convert to dB
+        Sxx_db = 10 * np.log10(Sxx + 1e-10)
+        
+        # Store in buffer
+        self.buffer_data = Sxx_db
+        self.buffer_t0 = t0
+        self.buffer_t1 = t1
+        self.buffer_extent = [t0, t1, f[0], f[-1]]
+        
+        return Sxx_db, self.buffer_extent
+        
+    def plot_on_axes(self, ax, audio_path, t0, t1, window_size=3.0, spec_buffer=5.0):
+        """Plot spectrogram on given axes with buffering.
+        
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            Axes to plot on
+        audio_path : str
+            Path to audio file
+        t0, t1 : float
+            Display time range in seconds
+        window_size : float
+            Display window size in seconds
+        spec_buffer : float
+            Buffer multiplier for spectrogram computation
+        """
+        if not audio_path:
+            return
+            
+        # Check if audio source changed
+        if self.current_audio_path != audio_path:
+            self.clear_buffer()
+            self.current_audio_path = audio_path
+            
+        # Calculate buffer range (larger than display range)
+        buffer_margin = (spec_buffer - 1) * window_size / 2
+        buffer_t0 = max(0, t0 - buffer_margin)
+        buffer_t1 = t1 + buffer_margin
+        
+        # Check if we need to recompute
+        if self.needs_recompute(buffer_t0, buffer_t1):
+            self.compute_spectrogram(audio_path, buffer_t0, buffer_t1)
+            
+        # Plot the visible portion
+        if self.buffer_data is not None:
+            # Calculate indices for visible portion
+            t_buffer = np.linspace(self.buffer_t0, self.buffer_t1, 
+                                  self.buffer_data.shape[1])
+            i0 = np.searchsorted(t_buffer, t0)
+            i1 = np.searchsorted(t_buffer, t1)
+            
+            # Plot only visible portion
+            visible_data = self.buffer_data[:, i0:i1]
+            extent = [t0, t1, self.buffer_extent[2], self.buffer_extent[3]]
+            
+            im = ax.imshow(visible_data, aspect='auto', origin='lower',
+                          extent=extent, vmin=self.vmin_db, vmax=self.vmax_db,
+                          cmap='viridis')
+            
+            ax.set_xlabel('Time (s)')
+            ax.set_ylabel('Frequency (Hz)')
+            ax.set_xlim(t0, t1)
+            
+    def clear_buffer(self):
+        """Clear the spectrogram buffer."""
+        self.buffer_data = None
+        self.buffer_extent = None
+        self.buffer_t0 = None
+        self.buffer_t1 = None
