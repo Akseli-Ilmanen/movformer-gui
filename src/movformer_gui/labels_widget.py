@@ -21,15 +21,14 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from file_utils import load_motif_mapping
+from movformer.utils.labels import load_motif_mapping, snap_to_nearest_changepoint
+from movformer.utils.xr_utils import sel_valid
 
-from label_utils import snap_to_nearest_changepoint
-from xarray_utils import sel_valid
 import cv2
 import time
 from audioio import play
 import random
-
+import pyqtgraph as pg
 
 
 class LabelsWidget(QWidget):
@@ -70,110 +69,121 @@ class LabelsWidget(QWidget):
         self.motif_mappings = load_motif_mapping(path)
         self._populate_motifs_table()
 
+    
     def set_lineplot(self, lineplot):
         """Set the lineplot reference and connect click handler."""
         self.lineplot = lineplot
-        self.lineplot.canvas.mpl_connect("button_press_event", self._on_plot_clicked)
-
+        self.lineplot.plot_clicked.connect(self._on_plot_clicked)
+        
     def plot_all_motifs(self, time_data=None, labels=None):
         """Plot all motifs for current trial and keypoint based on current labels state.
-
+        
         This implements state-based plotting similar to the MATLAB plot_motifs() function.
         It clears all existing motif rectangles and redraws them based on the current labels.
         """
         if labels is None or self.lineplot is None:
             return
-
-        ax = self.lineplot.ax
-
-        # Clear all existing motif patches (similar to delete(findall(..., 'Tag', 'xregion1')))
-        patches_to_remove = [
-            patch
-            for patch in ax.patches
-            if hasattr(patch, "get_label") and patch.get_label() == "motif"
-        ]
-        for patch in patches_to_remove:
-            patch.remove()
-
+        
+        # Clear existing motif rectangles
+        if hasattr(self.lineplot, 'label_items'):
+            for item in self.lineplot.label_items:
+                try:
+                    self.lineplot.plot_item.removeItem(item)
+                except:
+                    pass
+            self.lineplot.label_items.clear()
+        
         try:
-
-            # Get y-axis limits for rectangles
-            ylim = ax.get_ylim()
-
             # Find all labeled segments and plot them
             current_motif_id = 0
             segment_start = None
-
+            
             for i, label in enumerate(labels):
                 if label != 0:  # Start of a motif or continuing one
                     if label != current_motif_id:  # New motif starts
                         # End previous motif if it exists
                         if current_motif_id != 0 and segment_start is not None:
                             self._draw_motif_rectangle(
-                                ax,
                                 time_data[segment_start],
                                 time_data[i - 1],
                                 current_motif_id,
-                                ylim,
+                                None  # ylim not needed for PyQtGraph
                             )
-
+                        
                         # Start new motif
                         current_motif_id = label
                         segment_start = i
-
+                
                 else:  # End of current motif
                     if current_motif_id != 0 and segment_start is not None:
                         self._draw_motif_rectangle(
-                            ax,
                             time_data[segment_start],
                             time_data[i - 1],
                             current_motif_id,
-                            ylim,
+                            None
                         )
                         current_motif_id = 0
                         segment_start = None
-
+            
             # Handle case where motif continues to the end
             if current_motif_id != 0 and segment_start is not None:
                 self._draw_motif_rectangle(
-                    ax,
                     time_data[segment_start],
                     time_data[-1],
                     current_motif_id,
-                    ylim,
+                    None
                 )
-
-            if self.lineplot is not None:
-                self.lineplot.canvas.draw()
-
+            
         except (KeyError, IndexError, AttributeError) as e:
             print(f"Error plotting motifs: {e}")
 
-    def _draw_motif_rectangle(
-        self,
-        ax,
-        start_time: float,
-        end_time: float,
-        motif_id: int,
-        ylim: tuple[float, float],
-    ):
-        """Draw a single motif rectangle."""
+
+    def _draw_motif_rectangle(self, start_time, end_time, motif_id, ylim):
+        """Draw motif rectangle using PyQtGraph."""
         if motif_id not in self.motif_mappings:
             return
-
+        
         color = self.motif_mappings[motif_id]["color"]
-
-        # Create rectangle
-        rect = Rectangle(
-            (start_time, ylim[0]),
-            end_time - start_time,
-            ylim[1] - ylim[0],
-            facecolor=color,
-            alpha=0.7,
-            linewidth=1,
+        # Convert to 0-255 RGB
+        color_rgb = tuple(int(c*255) for c in color)
+        
+        rect = pg.LinearRegionItem(
+            values=(start_time, end_time),
+            orientation='vertical', 
+            brush=(*color_rgb, 180),  # Semi-transparent
+            movable=False
         )
-        rect.set_label("motif")  # Tag for identification
-        ax.add_patch(rect)
+        rect.setZValue(-10)
+        self.lineplot.plot_item.addItem(rect)
+        self.lineplot.label_items.append(rect)
+
+
+    # OLD 
+    # def _draw_motif_rectangle(
+    #     self,
+    #     ax,
+    #     start_time: float,
+    #     end_time: float,
+    #     motif_id: int,
+    #     ylim: tuple[float, float],
+    # ):
+    #     """Draw a single motif rectangle."""
+    #     if motif_id not in self.motif_mappings:
+    #         return
+
+    #     color = self.motif_mappings[motif_id]["color"]
+
+    #     # Create rectangle
+    #     rect = Rectangle(
+    #         (start_time, ylim[0]),
+    #         end_time - start_time,
+    #         ylim[1] - ylim[0],
+    #         facecolor=color,
+    #         alpha=0.7,
+    #         linewidth=1,
+    #     )
+    #     rect.set_label("motif")  # Tag for identification
+    #     ax.add_patch(rect)
 
     def _setup_ui(self):
         """Set up the user interface."""
@@ -295,37 +305,40 @@ class LabelsWidget(QWidget):
             f"Ready to label motif {motif_id} ({self.motif_mappings[motif_id]['name']}) - click twice to define region"
         )
 
-    def _on_plot_clicked(self, event):
-        """Handle mouse clicks on the lineplot widget."""
-
-        x_clicked = event.xdata
+    def _on_plot_clicked(self, click_info):
+        """Handle mouse clicks on the lineplot widget.
+        
+        Args:
+            click_info: dict with 'x' (time coordinate) and 'button' (Qt button constant)
+        """
+        x_clicked = click_info['x']
+        button = click_info['button']
+        
         if x_clicked is None:
             return
-
+        
         # Get current data from app_state
         ds_kwargs = self.app_state.get_ds_kwargs()
-        
         labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
-
-
         
-        if event.button == 1 and not self.ready_for_click:
-            # Select motif -> Then can delete or edit.
+        from qtpy.QtCore import Qt
+        
+        if button == Qt.LeftButton and not self.ready_for_click:
+            # Select motif -> Then can delete or edit
             self._check_motif_click(x_clicked, labels)
-
+        
         # Handle right-click - play video of motif if clicking on one
-        if event.button == 3:  # Right mouse button
+        elif button == Qt.RightButton:
             if self._check_motif_click(x_clicked, labels):
                 self._play_segment()
             return
-
+        
         # Handle left-click for labeling/editing (only in label mode)
-        if event.button == 1 and self.ready_for_click:
-
+        elif button == Qt.LeftButton and self.ready_for_click:
             # Snap to nearest changepoint if available
             x_clicked_idx = int(x_clicked * self.app_state.ds.fps)  # Convert to frame index
             x_snapped = self._snap_to_changepoint(x_clicked_idx)
-
+            
             if self.first_click is None:
                 # First click - just store the position
                 self.first_click = x_snapped
@@ -333,7 +346,8 @@ class LabelsWidget(QWidget):
                 # Second click - store position and automatically apply
                 self.second_click = x_snapped
                 self._apply_motif()  # Automatically apply after two clicks
-
+                
+            
     def _check_motif_click(self, x_clicked: float, labels: np.ndarray) -> bool:
         """Check if the click is on an existing motif and select it if so. Move left and right until you find its start and stop idxs."""
 
@@ -361,32 +375,22 @@ class LabelsWidget(QWidget):
             return True
         else:
             return False
+        
+
 
     def _snap_to_changepoint(self, x_clicked_idx: float) -> float:
         """Snap the clicked x-coordinate to the nearest changepoint."""
 
-        # Check if "changepoints" exists and is a binary vector
-        if "changepoints" not in self.app_state.ds:
-            return x_clicked_idx
-
         ds_kwargs = self.app_state.get_ds_kwargs()
-        changepoints_data = self.app_state.ds.sel(**ds_kwargs)["changepoints"].values
-
-        if changepoints_data is None or not np.array_equal(
-            changepoints_data, changepoints_data.astype(bool)
-        ):
+        
+        cp_ds = self.app_state.ds.sel(**ds_kwargs).filter_by_attrs(type="changepoints")
+        if len(cp_ds.data_vars) == 0:
             return x_clicked_idx
 
-        # Get changepoints for current trial and keypoint
-        changepoints_data = self.app_state.ds.sel(**ds_kwargs)["changepoints"].values
-
-        # Find changepoint times
-        changepoint_indices = np.where(changepoints_data)[0]
-        if len(changepoint_indices) == 0:
-            return x_clicked_idx
-
-        snapped_val, _ = snap_to_nearest_changepoint(x_clicked_idx, changepoint_indices)
+        snapped_val, _ = snap_to_nearest_changepoint(x_clicked_idx, cp_ds)
         return snapped_val
+    
+    
 
     def _apply_motif(self):
         """Apply the selected motif to the selected time range."""

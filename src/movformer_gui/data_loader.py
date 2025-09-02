@@ -9,6 +9,12 @@ from napari.utils.notifications import show_error
 
 
 
+# rewrite this code by simplfying,
+# use filter attrs xarray fucnction
+# and place lots of statements like these to throw error if something doesn't occur:
+        # assert(feature.shape[1] == event_seq_raw.shape[0])
+        # assert(feature.shape[1] == boundary_seq_raw.shape[0])
+
 
 def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
     """Load dataset from file path and cache metadata on the instance.

@@ -110,6 +110,8 @@ class NavigationWidget(QWidget):
         self.click_debounce_timer.start(500)  # Restart timer on every click
 
 
+
+
     def _jump_to_segment_after_debounce(self):
         self.app_state.stream.jump_to_segment(self.app_state.current_time)
 
@@ -142,9 +144,7 @@ class NavigationWidget(QWidget):
         self.data_widget._update_video_audio(new_trial=True)
         self.data_widget._update_plot(new_trial=True)
 
-        # Clear spectrogram buffer when switching trials
-        if hasattr(self, 'lineplot') and self.lineplot is not None:
-            self.lineplot.clear_spectrogram_buffer()
+
 
 
 

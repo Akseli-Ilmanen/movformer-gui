@@ -24,7 +24,7 @@ from qtpy.QtCore import Qt
 from .data_loader import load_dataset
 from .video_audio_streamer import VideoAudioStreamViewer
 from .audio_cache import SharedAudioCache
-from xarray_utils import sel_valid
+from movformer.utils.xr_utils import sel_valid
 import napari
 
 
@@ -465,7 +465,7 @@ class DataWidget(QWidget):
             return
 
         try:
-            self.lineplot.updateLinePlot()
+            self.lineplot.update_plot()
             # Sync logic removed; handled by AudioVideoSync classes
 
             ds = self.app_state.ds
@@ -563,9 +563,6 @@ class DataWidget(QWidget):
         """Handle spectrogram checkbox state change."""
         self.app_state.plot_spectrogram = bool(self.plot_spec_checkbox.isChecked())
         
-        if self.lineplot is not None:
-            self.lineplot.clear_spectrogram_buffer()
-            self.lineplot.updateLinePlot()
             
         self._update_plot()
 

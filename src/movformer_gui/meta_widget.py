@@ -10,12 +10,14 @@ from qtpy.QtWidgets import QWidget, QVBoxLayout, QSlider
 from .app_state import ObservableAppState
 from .data_widget import DataWidget
 from .labels_widget import LabelsWidget
-from .lineplot import LinePlot
+from .integrated_lineplot import IntegratedLinePlot
 from .navigation_widget import NavigationWidget
 from .plot_widgets import PlotsWidget
 from .shortcuts_dialog import ShortcutsWidget
 from qtpy.QtWidgets import QLabel, QHBoxLayout
 
+
+from .integrated_lineplot import IntegratedLinePlot
 
 class MetaWidget(CollapsibleWidgetContainer):
 
@@ -71,7 +73,8 @@ class MetaWidget(CollapsibleWidgetContainer):
         container_layout.addLayout(slider_layout)
 
         # LinePlot widget
-        self.lineplot = LinePlot(napari_viewer, self.app_state)
+        self.lineplot = IntegratedLinePlot(napari_viewer, self.app_state)
+        #self.lineplot = LinePlot(napari_viewer, self.app_state)
         container_layout.addWidget(self.lineplot)
 
         slider_lineplot_container.setLayout(container_layout)

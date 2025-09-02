@@ -34,8 +34,8 @@ class AppStateSpec:
         "ymax": (float | None, None, True, object),
         "spec_ymin": (float | None, None, True, object),
         "spec_ymax": (float | None, None, True, object),
-        "window_size": (float | None, None, True, object),
-        "jump_size": (float | None, None, True, object),
+        "window_size": (float, 2.0, True, object), # seconds
+        "jump_size": (float, 0.2, True, object), # seconds
         "audio_buffer": (float | None, None, True, float),
         "spec_buffer": (float | None, None, True, float),
         "video_buffer_size": (int, 300, True, int),  # Number of frames to buffer
@@ -125,7 +125,7 @@ class ObservableAppState(QObject):
                     and self.sync_state == "video_to_lineplot"
                     and hasattr(self, 'lineplot')
                 ):
-                    self.lineplot.request_sync_update()
+                    self.lineplot.update_time_marker()
             return
         super().__setattr__(name, value)
         

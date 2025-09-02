@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(r'C:\Users\Admin\Documents\Akseli\Code\MovFormer\movformer')
+
 try:
     from ._version import version as __version__
 except ImportError:
@@ -6,17 +10,19 @@ except ImportError:
 from .meta_widget import MetaWidget
 from .data_widget import DataWidget
 from .labels_widget import LabelsWidget
-from plot_utils import get_motif_colours, plot_ds_variable
-from file_utils import load_motif_mapping
+
+# Import commonly used MovFormer modules
+from movformer.utils import *
+from movformer.features import *
+from movformer.plots import *
+
+
 
 __all__ = (
     "MetaWidget",
     "DataWidget", 
     "LabelsWidget",
     "LinePlotWidget",
-    "get_motif_colours",
-    "plot_ds_variable",
-    "load_motif_mapping",
 )
 
 # from .reader import napari_get_reader
