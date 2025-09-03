@@ -496,7 +496,10 @@ class LabelsWidget(QWidget):
         end_time = self.current_motif_pos[1] / self.app_state.ds.fps
         
         
+        if self.app_state.stream.is_paused:
+            self.app_state.stream.resume()
+            
         if self.app_state.video_path and self.app_state.audio_path:
-            self.app_state.stream.play_segment(start_time, end_time)
+            self.app_state.stream.jump_to_segment(start_time, end_time)
         elif not self.app_state.audio_path:
-            self.app_state.stream.play_segment(start_time, end_time)
+            self.app_state.stream.jump_to_segment(start_time, end_time)

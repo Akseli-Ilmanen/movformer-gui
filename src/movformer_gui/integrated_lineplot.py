@@ -142,8 +142,13 @@ class IntegratedLinePlot(QWidget):
         y_max = self.app_state.get_with_default('ymax')
         
         # Update view range without triggering signals
-        self.vb.setRange(xRange=(x_min, x_max), yRange=(y_min, y_max), padding=0)
-        
+
+
+        if y_min is not None and y_max is not None:
+            self.vb.setRange(xRange=(x_min, x_max), yRange=(y_min, y_max), padding=0)
+        else:
+            self.vb.setRange(xRange=(x_min, x_max), padding=0)
+
         # Update time marker position and ensure visibility
         self.time_marker.setValue(current_time)
         self.time_marker.show()

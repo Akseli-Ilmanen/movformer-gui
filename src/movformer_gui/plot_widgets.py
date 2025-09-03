@@ -26,18 +26,7 @@ class PlotsWidget(QWidget):
         
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
-        
-        # Sync mode indicator
-        self.sync_mode_label = QLabel("Current Mode: Video → LinePlot")
-        self.sync_mode_label.setStyleSheet("font-weight: bold; padding: 5px;")
-        main_layout.addWidget(self.sync_mode_label)
-        
-        # Mode-specific info
-        self.mode_info_label = QLabel(
-            "Plot window follows video playback (no manual control)"
-        )
-        self.mode_info_label.setStyleSheet("color: #666; font-size: 10pt; padding: 5px;")
-        main_layout.addWidget(self.mode_info_label)
+    
         
         # Reset button
         reset_button = QPushButton("Reset to Defaults")
@@ -81,36 +70,16 @@ class PlotsWidget(QWidget):
         self.audio_buffer_edit.editingFinished.connect(self._on_edited)
         self.spec_buffer_edit.editingFinished.connect(self._on_edited)
 
-        # Connect to sync state changes
-        if hasattr(app_state, 'sync_state_changed'):
-            app_state.sync_state_changed.connect(self._update_sync_mode_display)
         
         # Load initial settings
         self._restore_or_set_default_selections()
-        self._update_sync_mode_display()
+
 
     def set_lineplot(self, lineplot):
         """Set reference to lineplot widget."""
         self.lineplot = lineplot
 
-    def _update_sync_mode_display(self):
-        """Update UI to reflect current sync mode."""
-        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
-        
-        if sync_state == "video_to_lineplot":
-            self.sync_mode_label.setText("Current Mode: Video → LinePlot")
-            self.mode_info_label.setText(
-                "Plot window follows video playback (no manual control)"
-            )
-            self.jump_size_edit.setEnabled(False)
-            self.jump_note_label.show()
-        else:
-            self.sync_mode_label.setText("Current Mode: LinePlot → Video")
-            self.mode_info_label.setText(
-                "Interactive plot control with keyboard shortcuts enabled"
-            )
-            self.jump_size_edit.setEnabled(True)
-            self.jump_note_label.hide()
+
 
     def _restore_or_set_default_selections(self):
         """Restore selections from app_state or set defaults."""

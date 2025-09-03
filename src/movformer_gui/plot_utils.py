@@ -133,7 +133,7 @@ def plot_singledim(plot_item, time, data, color_data=None, changepoints_dict=Non
     else:
         curve = plot_item.plot(
             time, data,
-            pen=pg.mkPen(color='w', width=2),
+            pen=pg.mkPen(color='k', width=2),
         )
         existing_items.append(curve)
 

@@ -154,8 +154,8 @@ class NavigationWidget(QWidget):
     def _trial_change_consequences(self):
         """Handle consequences of trial changes."""
         if self.data_widget:
-            self.data_widget._update_video_audio(new_trial=True)
-            self.data_widget._update_plot(new_trial=True)
+            self.data_widget._update_video_audio()
+            self.data_widget._update_plot()
 
     def _on_trial_changed(self):
         """Handle trial selection change."""

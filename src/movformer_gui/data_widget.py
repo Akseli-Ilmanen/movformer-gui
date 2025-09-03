@@ -26,10 +26,10 @@ from .video_audio_streamer import VideoAudioStreamViewer
 from .audio_cache import SharedAudioCache
 from movformer.utils.xr_utils import sel_valid
 import napari
+from movement.napari.loader_widgets import DataLoader
+from pathlib import Path
 
-
-
-class DataWidget(QWidget):
+class DataWidget(DataLoader, QWidget):
 
    
     """Widget to control which data is loaded, displayed and stored for next time."""
@@ -41,7 +41,8 @@ class DataWidget(QWidget):
         meta_widget,
         parent=None,
     ):
-        super().__init__(parent=parent)
+        DataLoader.__init__(self, napari_viewer)  # Pass required args for DataLoader
+        QWidget.__init__(self, parent=parent)
         self.parent = parent
         self.viewer = napari_viewer
         self.setLayout(QFormLayout())
@@ -59,8 +60,14 @@ class DataWidget(QWidget):
         # Dictionary to store all controls for enabling/disabling
         self.controls = []
         
-        
-        
+
+        # Tracking stuff
+        self.fps = None
+        self.source_software = None
+        self.file_path = None
+        self.file_name = None
+
+
 
         self.app_state.audio_video_sync = None
         # E.g. {keypoints = ["beakTip, StickTip"], trials=[1, 2, 3, 4], ...}
@@ -123,7 +130,12 @@ class DataWidget(QWidget):
             object_name="audio_folder",
             browse_callback=lambda: self.on_browse_clicked("folder", "audio"),
         )
-        
+        self.tracking_folder_edit = self._create_path_widget(
+            label="Tracking folder (e.g. DLC):",
+            object_name="tracking_folder",
+            browse_callback=lambda: self.on_browse_clicked("folder", "tracking"),
+        )
+            
 
         # Removing audio makes GUI faster.
         self.clear_audio_checkbox = QCheckBox("Clear audio")
@@ -178,6 +190,8 @@ class DataWidget(QWidget):
                 caption = f"Open folder with video files (e.g. mp4, mov)."
             elif media_type == "audio":
                 caption = f"Open folder with audio files (e.g. wav, mp3, mp4)."
+            elif media_type == "tracking":
+                caption = f"Open folder with tracking files (e.g. .csv, .h5)."
 
             folder_path = QFileDialog.getExistingDirectory(None, caption=caption)
 
@@ -189,6 +203,9 @@ class DataWidget(QWidget):
                 self.audio_folder_edit.setText(folder_path)
                 self.app_state.audio_folder = folder_path
                 self.clear_audio_checkbox.setChecked(False)
+            elif media_type == "tracking":
+                self.tracking_folder_edit.setText(folder_path)
+                self.app_state.tracking_folder = folder_path
 
 
 
@@ -215,6 +232,7 @@ class DataWidget(QWidget):
 
         self._update_plot()
         self._update_video_audio()
+        self._update_tracking()
 
         load_btn = self.findChild(QPushButton, "load_button")
         load_btn.setEnabled(False)
@@ -275,7 +293,11 @@ class DataWidget(QWidget):
             combo.addItems(["None"])
             self.layout().addRow("Mics:", combo)
             self.audio_player = None
-        
+
+
+        if "tracking" in self.type_vars_dict.keys():
+            self._create_combo_widget("tracking", self.type_vars_dict["tracking"])
+
 
 
         # Add spectrogram checkbox
@@ -357,7 +379,9 @@ class DataWidget(QWidget):
 
 
         if key in ["cameras", "mics"]:
-            self._update_video_audio
+            self._update_video_audio()
+        elif key == "tracking":
+            self._update_tracking()
         elif key in ["features", "colors", "individuals", "keypoints"]:
             self._update_plot()
         elif key == "trial_conditions":
@@ -457,7 +481,7 @@ class DataWidget(QWidget):
         self._update_plot()
 
 
-    def _update_plot(self, new_trial: bool = False):
+    def _update_plot(self):
         """Update the line plot with current trial/keypoint/variable selection."""
         if not self.app_state.ready:
             return
@@ -485,9 +509,10 @@ class DataWidget(QWidget):
             return
         self.navigation_widget.slider_clicks_enabled = False
 
-        # Remove all previous layers
-        for layer in self.viewer.layers:
-            self.viewer.layers.remove(layer)
+        # Remove all previous layers with name "video"
+        for layer in list(self.viewer.layers):
+            if layer.name == "video":
+                self.viewer.layers.remove(layer)
 
 
         video_file = (
@@ -499,38 +524,82 @@ class DataWidget(QWidget):
         video_path = os.path.join(self.app_state.video_folder, video_file)
         self.app_state.video_path = os.path.normpath(video_path)
 
-        if self.app_state.audio_folder:
-            # Optional 
-            audio_file = (
-                self.app_state.ds[self.app_state.mics_sel]
-                .sel(trials=self.app_state.trials_sel)
-                .values.item()
-            )
 
-            audio_path = os.path.join(self.app_state.audio_folder, audio_file)
-            self.app_state.audio_path = os.path.normpath(audio_path)
+        # Open video as the lowest layer
+        self.viewer.open(self.app_state.video_path, name="video")
+        video_layer = self.viewer.layers["video"]
+        video_index = self.viewer.layers.index(video_layer)
+        self.viewer.layers.move(video_index, 0)
 
 
+        # if self.app_state.audio_folder:
+        #     # Optional 
+        #     audio_file = (
+        #         self.app_state.ds[self.app_state.mics_sel]
+        #         .sel(trials=self.app_state.trials_sel)
+        #         .values.item()
+        #     )
 
-        # Timeline display with number of frames
-        cap = cv2.VideoCapture(self.app_state.video_path)
-        self.app_state.num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-        self.navigation_widget.time_slider.setMinimum(0)
-        self.navigation_widget.time_slider.setMaximum(self.app_state.num_frames - 1)
-        self.navigation_widget.slider_clicks_enabled = True
+        #     audio_path = os.path.join(self.app_state.audio_folder, audio_file)
+        #     self.app_state.audio_path = os.path.normpath(audio_path)
+
+
+
+        # # Timeline display with number of frames
+        # cap = cv2.VideoCapture(self.app_state.video_path)
+        # self.app_state.num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        # cap.release()
+        # self.navigation_widget.time_slider.setMinimum(0)
+        # self.navigation_widget.time_slider.setMaximum(self.app_state.num_frames - 1)
+        # self.navigation_widget.slider_clicks_enabled = True
  
  
-        self.app_state.stream = VideoAudioStreamViewer(
-            viewer=self.viewer,
-            app_state=self.app_state,
-            video_source=self.app_state.video_path,
-            audio_source=self.app_state.audio_path,
-            enable_audio=True if self.app_state.audio_path else False,
-        )
+        # self.app_state.stream = VideoAudioStreamViewer(
+        #     viewer=self.viewer,
+        #     app_state=self.app_state,
+        #     video_source=self.app_state.video_path,
+        #     audio_source=self.app_state.audio_path,
+        #     enable_audio=True if self.app_state.audio_path else False,
+        # )
         
-        self.app_state.stream.start() # so user sees that video loaded
-        self.app_state.stream.pause()
+        # self.app_state.stream.start() # so user sees that video loaded
+        # self.app_state.stream.pause()
+
+
+
+
+    def _update_tracking(self):
+        if not self.app_state.tracking_folder:
+            return
+
+        # Remove all previous layers with name "video"
+        for layer in list(self.viewer.layers):
+            if self.file_name and layer.name in [f"tracks: {self.file_name}", f"points: {self.file_name}", f"boxes: {self.file_name}"]:
+                self.viewer.layers.remove(layer)
+                
+        
+        self.fps = self.app_state.ds.fps
+        self.source_software = self.app_state.ds.source_software
+        
+        tracking_file = (
+            self.app_state.ds[self.app_state.tracking_sel]
+            .sel(trials=self.app_state.trials_sel)
+            .values.item()
+        )   
+        
+        self.file_path = os.path.join(self.app_state.tracking_folder, tracking_file)
+        self.file_name = Path(self.file_path).name
+
+        self._format_data_for_layers()
+        self._set_common_color_property()
+        self._set_text_property()
+        self._add_points_layer()
+        self._add_tracks_layer()
+        if self.data_bboxes is not None:
+            self._add_boxes_layer()
+        self._set_initial_state()
+        
+        
 
     def toggle_play_pause(self):
         """Toggle play/pause state of the video/audio stream."""
@@ -538,9 +607,12 @@ class DataWidget(QWidget):
             return
         
         if self.app_state.stream.is_paused:
+            self.navigation_widget.sync_toggle_btn.setCurrentIndex(0) # "video_to_lineplot"
             self.app_state.stream.resume()
         else:
+            self.navigation_widget.sync_toggle_btn.setCurrentIndex(1) # "lineplot_to_video"
             self.app_state.stream.pause()
+
 
 
     def closeEvent(self, event):

@@ -24,8 +24,10 @@ class AppStateSpec:
         "file_path": (str | None, None, True, str),
         "video_folder": (str | None, None, True, str),
         "audio_folder": (str | None, None, True, str),
+        "tracking_folder": (str | None, None, True, str),
         "video_path": (str | None, None, True, str),
         "audio_path": (str | None, None, True, str),
+        "tracking_path": (str | None, None, True, str),
         "current_frame": (int, 0, False, int),  # PRIMARY source of truth
         "num_frames": (int, 0, False, int),
         "_info_data": (dict[str, Any], {}, False, object),
