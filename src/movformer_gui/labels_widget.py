@@ -496,7 +496,6 @@ class LabelsWidget(QWidget):
         end_time = self.current_motif_pos[1] / self.app_state.ds.fps
         
         self.app_state.current_frame = round(self.current_motif_pos[0])
-        self.app_state.current_time = start_time
 
 
 

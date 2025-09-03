@@ -1,37 +1,50 @@
-"""Collapsible widget to control settings for all plots."""
+"""Enhanced plot widgets with sync mode awareness."""
 
-from qtpy.QtWidgets import QFormLayout, QLineEdit, QWidget, QPushButton, QVBoxLayout, QHBoxLayout
+from qtpy.QtWidgets import (QFormLayout, QLineEdit, QWidget, QPushButton, 
+                            QVBoxLayout, QLabel, QCheckBox)
 from napari.viewer import Viewer
+from typing import Optional
+
 
 class PlotsWidget(QWidget):
-    """Plots controls.
-
+    """Plot controls with sync mode awareness.
+    
     Keys used in gui_settings.yaml (via app_state):
-      - ymin
-      - ymax
-      - spec_ymin
-      - spec_ymax
+      - ymin, ymax
+      - spec_ymin, spec_ymax
       - window_size
       - jump_size
+      - audio_buffer
+      - spec_buffer
     """
 
     def __init__(self, napari_viewer: Viewer, app_state, parent=None):
         super().__init__(parent=parent)
-        self.app_state = app_state  # Use the shared app state
-        self.viewer = napari_viewer  # Will be set after creation
-        self.lineplot = None  # Will be set after creation
+        self.app_state = app_state
+        self.viewer = napari_viewer
+        self.lineplot = None
         
-        
-        # Main layout
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
         
-        # Reset button at the top
+        # Sync mode indicator
+        self.sync_mode_label = QLabel("Current Mode: Video → LinePlot")
+        self.sync_mode_label.setStyleSheet("font-weight: bold; padding: 5px;")
+        main_layout.addWidget(self.sync_mode_label)
+        
+        # Mode-specific info
+        self.mode_info_label = QLabel(
+            "Plot window follows video playback (no manual control)"
+        )
+        self.mode_info_label.setStyleSheet("color: #666; font-size: 10pt; padding: 5px;")
+        main_layout.addWidget(self.mode_info_label)
+        
+        # Reset button
         reset_button = QPushButton("Reset to Defaults")
         reset_button.clicked.connect(self._reset_to_defaults)
         main_layout.addWidget(reset_button)
         
-        # Form layout for the controls
+        # Form layout for controls
         layout = QFormLayout()
         main_layout.addLayout(layout)
 
@@ -49,11 +62,16 @@ class PlotsWidget(QWidget):
         layout.addRow("Y min (spectrogram):", self.spec_ymin_edit)
         layout.addRow("Y max (spectrogram):", self.spec_ymax_edit)
         layout.addRow("Window size (s):", self.window_s_edit)
-        layout.addRow("Jump size (s):", self.jump_size_edit)
+        layout.addRow("Jump size (s)*:", self.jump_size_edit)
         layout.addRow("Audio buffer (s):", self.audio_buffer_edit)
         layout.addRow("Spectrogram buffer (x):", self.spec_buffer_edit)
+        
+        # Note about jump size
+        self.jump_note_label = QLabel("*Jump size only works in LinePlot → Video mode")
+        self.jump_note_label.setStyleSheet("font-size: 9pt; color: #888;")
+        main_layout.addWidget(self.jump_note_label)
 
-        # Wire events
+        # Connect edit signals
         self.ymin_edit.editingFinished.connect(self._on_edited)
         self.ymax_edit.editingFinished.connect(self._on_edited)
         self.spec_ymin_edit.editingFinished.connect(self._on_edited)
@@ -63,21 +81,39 @@ class PlotsWidget(QWidget):
         self.audio_buffer_edit.editingFinished.connect(self._on_edited)
         self.spec_buffer_edit.editingFinished.connect(self._on_edited)
 
-        # Load settings from YAML via app_state (handles None values properly)
-        self._restore_or_set_default_selections()
-
-
-
+        # Connect to sync state changes
+        if hasattr(app_state, 'sync_state_changed'):
+            app_state.sync_state_changed.connect(self._update_sync_mode_display)
         
+        # Load initial settings
+        self._restore_or_set_default_selections()
+        self._update_sync_mode_display()
+
     def set_lineplot(self, lineplot):
-        """Set references to other widgets after creation."""
+        """Set reference to lineplot widget."""
         self.lineplot = lineplot
 
+    def _update_sync_mode_display(self):
+        """Update UI to reflect current sync mode."""
+        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
         
-        
+        if sync_state == "video_to_lineplot":
+            self.sync_mode_label.setText("Current Mode: Video → LinePlot")
+            self.mode_info_label.setText(
+                "Plot window follows video playback (no manual control)"
+            )
+            self.jump_size_edit.setEnabled(False)
+            self.jump_note_label.show()
+        else:
+            self.sync_mode_label.setText("Current Mode: LinePlot → Video")
+            self.mode_info_label.setText(
+                "Interactive plot control with keyboard shortcuts enabled"
+            )
+            self.jump_size_edit.setEnabled(True)
+            self.jump_note_label.hide()
 
     def _restore_or_set_default_selections(self):
-        """Restore selections from app_state or set defaults if missing."""
+        """Restore selections from app_state or set defaults."""
         for attr, edit in [
             ("ymin", self.ymin_edit),
             ("ymax", self.ymax_edit),
@@ -94,10 +130,8 @@ class PlotsWidget(QWidget):
                 setattr(self.app_state, attr, value)
             edit.setText("" if value is None else str(value))
 
-
-
-
-    def _parse_float(self, text):
+    def _parse_float(self, text: str) -> Optional[float]:
+        """Parse float from text input."""
         s = (text or "").strip()
         if not s:
             return None
@@ -106,10 +140,8 @@ class PlotsWidget(QWidget):
         except ValueError:
             return None
 
-
-
     def _on_edited(self):
-        """Handle when user edits the input fields."""
+        """Handle user edits to input fields."""
         edits = {
             "ymin": self.ymin_edit,
             "ymax": self.ymax_edit,
@@ -120,6 +152,7 @@ class PlotsWidget(QWidget):
             "audio_buffer": self.audio_buffer_edit,
             "spec_buffer": self.spec_buffer_edit
         }
+        
         values = {}
         for attr, edit in edits.items():
             val = self._parse_float(edit.text())
@@ -129,20 +162,32 @@ class PlotsWidget(QWidget):
             if self.app_state is not None:
                 setattr(self.app_state, attr, val)
 
+        # Update plot if available
         if self.lineplot is not None:
-            # Determine which y-limits to use based on current plot type
-            is_spectrogram = getattr(self.app_state, "plot_spectrogram", False)
-            if is_spectrogram:
-                # Use spectrogram y-limits for spectrogram mode
-                self.lineplot.update_yrange(values["spec_ymin"], values["spec_ymax"], values["window_size"])
+            sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
+            
+            if sync_state == "video_to_lineplot":
+                # In video sync mode, changes will be applied automatically
+                # by the lineplot's update timer
+                pass
             else:
-                # Use line plot y-limits for line plot mode
-                self.lineplot.update_yrange(values["ymin"], values["ymax"], values["window_size"])
-
- 
+                # In interactive mode, apply changes immediately
+                is_spectrogram = getattr(self.app_state, "plot_spectrogram", False)
+                if is_spectrogram:
+                    self.lineplot.update_yrange(
+                        values["spec_ymin"], 
+                        values["spec_ymax"], 
+                        values["window_size"]
+                    )
+                else:
+                    self.lineplot.update_yrange(
+                        values["ymin"], 
+                        values["ymax"], 
+                        values["window_size"]
+                    )
 
     def _reset_to_defaults(self):
-        """Reset all plot values to their defaults and update the plot."""
+        """Reset all plot values to defaults."""
         for attr, edit in [
             ("ymin", self.ymin_edit),
             ("ymax", self.ymax_edit),
@@ -153,46 +198,41 @@ class PlotsWidget(QWidget):
             ("audio_buffer", self.audio_buffer_edit),
             ("spec_buffer", self.spec_buffer_edit)
         ]:
-            value = getattr(self.app_state, attr, None) if self.app_state is not None else None
-            if value is None:
-                value = self.app_state.get_with_default(attr)
-            # Set text field
+            value = self.app_state.get_with_default(attr)
             edit.setText("" if value is None else str(value))
-            # Set app_state attribute if possible
             if self.app_state is not None:
                 setattr(self.app_state, attr, value)
-
-        # Trigger plot update
+        
         self._on_edited()
 
+    # --- Shortcut methods (only work in lineplot_to_video mode) ---
+    
+    def _check_interactive_mode(self) -> bool:
+        """Check if we're in interactive mode."""
+        return getattr(self.app_state, 'sync_state', '') == 'lineplot_to_video'
 
-    def _adjust_ylim(self, factor):
-        """Adjust y-axis limits."""
-        if self.lineplot:
-            vb = self.lineplot.plot_item.vb
-            ymin, ymax = vb.viewRange()[1]
-            center = (ymin + ymax) / 2
-            new_range = (ymax - ymin) * (1 + factor)
-            vb.setYRange(center - new_range/2, center + new_range/2)
+    def _adjust_ylim(self, factor: float):
+        """Adjust y-axis limits (zoom in/out)."""
+        if not self._check_interactive_mode() or not self.lineplot:
+            return
+            
+        vb = self.lineplot.plot_item.vb
+        ymin, ymax = vb.viewRange()[1]
+        center = (ymin + ymax) / 2
+        new_range = (ymax - ymin) * (1 + factor)
+        vb.setYRange(center - new_range/2, center + new_range/2)
 
-    # Line 200 - _shift_yrange method  
-    def _shift_yrange(self, factor):
-        """Shift y-axis range."""
-        if self.lineplot:
-            vb = self.lineplot.plot_item.vb
-            ymin, ymax = vb.viewRange()[1]
-            shift = (ymax - ymin) * factor
-            vb.setYRange(ymin + shift, ymax + shift)
+    def _shift_yrange(self, factor: float):
+        """Shift y-axis range up/down."""
+        if not self._check_interactive_mode() or not self.lineplot:
+            return
+            
+        vb = self.lineplot.plot_item.vb
+        ymin, ymax = vb.viewRange()[1]
+        shift = (ymax - ymin) * factor
+        vb.setYRange(ymin + shift, ymax + shift)
 
-    # Line 220 - _jump_plot method
-    def _jump_plot(self, direction):
+    def _jump_plot(self, direction: int):
         """Jump plot view horizontally."""
-        if self.lineplot:
-            jump_size = self.app_state.get_with_default("jump_size")
-            self.lineplot.nav.pan_x(direction * jump_size)
-
-    # Line 240 - _adjust_window_size method
-    def _adjust_window_size(self, factor):
-        """Adjust x-axis window size."""
-        if self.lineplot:
-            self.lineplot.nav.zoom_x(factor)
+        if not self._check_interactive_mode() or not self.lineplot:
+            return

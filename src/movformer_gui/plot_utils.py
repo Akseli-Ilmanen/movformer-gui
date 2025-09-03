@@ -177,8 +177,15 @@ def plot_ds_variable(plot_item, ds, ds_kwargs, variable, color_variable=None):
     Returns:
         list of created plot items
     """
-    # Clear previous items
-    plot_item.clear()
+    
+    # Clear anything but red line
+    items_to_remove = []
+    for item in plot_item.items[:]: 
+        if not isinstance(item, pg.InfiniteLine):
+            items_to_remove.append(item)
+    
+    for item in items_to_remove:
+        plot_item.removeItem(item)
     
     var = ds[variable]
     time = ds["time"].values

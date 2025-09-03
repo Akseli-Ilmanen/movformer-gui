@@ -273,8 +273,7 @@ class VideoAudioStreamViewer:
                 if self.image_layer is not None:
                     self.image_layer.data = frame
                     self.current_position = timestamp
-                    self.app_state.current_time = timestamp
-                    self.app_state.current_frame = round(self.app_state.current_time * self.app_state.ds.fps)
+                    self.app_state.current_frame = round(timestamp * self.app_state.ds.fps)
                     
    
             
@@ -296,8 +295,8 @@ class VideoAudioStreamViewer:
         self.seek_position = position
         self.seek_requested = True
 
-        self.app_state.current_time = self.seek_position
-        self.app_state.current_frame = round(self.app_state.current_time * self.app_state.ds.fps)
+
+        self.app_state.current_frame = round(position * self.app_state.ds.fps)
     
             
         

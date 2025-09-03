@@ -220,8 +220,6 @@ class DataWidget(QWidget):
         load_btn.setEnabled(False)
         load_btn.setText("Restart app to load new data")
 
-        # Initialize current_time and time_label
-        self.app_state.current_time = 0
         self.app_state.current_frame = 0
 
 
