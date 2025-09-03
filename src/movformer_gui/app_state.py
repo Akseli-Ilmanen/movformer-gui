@@ -76,7 +76,6 @@ class ObservableAppState(QObject):
         super().__init__()
         object.__setattr__(self, "_state", AppState())
         object.__setattr__(self, "_fps_cache", None)  # Cache for FPS value
-        object.__setattr__(self, "_update_lock", False)  # Prevent recursive updates
         
         self.settings = get_settings()
         self._yaml_path = yaml_path or "gui_settings.yaml"
@@ -89,46 +88,6 @@ class ObservableAppState(QObject):
         self.lineplot = None
     
 
-    @property
-    def current_frame(self) -> int:
-        """Direct access to current frame."""
-        return self._state.current_frame
-    
-    @current_frame.setter
-    def current_frame(self, value: int):
-        """Set current frame and trigger updates."""
-        if self._update_lock:
-            return
-            
-        old_frame = self._state.current_frame
-        old_time = self._state.current_frame / self._state.ds.fps if self._state.ds.fps else 0
-
-        self._state.current_frame = value
-        
-        if old_frame != value:
-            # Emit frame changed signal
-            if hasattr(self, 'current_frame_changed'):
-                self.current_frame_changed.emit(value)
-            
-            # Update navigation widget slider
-            if self.navigation_widget is not None:
-                self.navigation_widget.update_slider()
-            
-            # Check if time changed (it should if fps exists)
-            new_time = self._state.current_frame / self._state.ds.fps
-            
-            
-            
-            if abs(old_time - new_time) > 0.001:  # Avoid floating point issues
-                self.current_time_changed.emit(new_time)
-                
-                # Update lineplot in video_to_lineplot mode
-                if (self.sync_state == "video_to_lineplot" and 
-                    self.lineplot is not None):
-                    self.lineplot._update_window_position()
-    
-    
-    
     def _get_fps(self) -> Optional[float]:
         """Get FPS from dataset, with caching."""
         if hasattr(self._state, 'ds') and self._state.ds is not None:
@@ -151,7 +110,7 @@ class ObservableAppState(QObject):
     
     def __setattr__(self, name, value):
         # Handle special attributes that don't go through state
-        if name in ("_state", "_fps_cache", "_update_lock", "settings", 
+        if name in ("_state", "_fps_cache", "settings", 
                    "_yaml_path", "_auto_save_timer", "navigation_widget", "lineplot"):
             super().__setattr__(name, value)
             return
@@ -172,10 +131,22 @@ class ObservableAppState(QObject):
             elif name == "ds":
                 # Clear FPS cache when dataset changes
                 self._fps_cache = None
+                
             elif name == "sync_state":
                 # Update lineplot mode when sync state changes
                 if self.lineplot is not None:
                     self.lineplot.set_sync_mode(value)
+            
+            elif name == "current_frame":
+                
+                if old_value != value:
+                    if self.navigation_widget is not None: 
+                        self.navigation_widget.update_slider()
+                        
+                    # Update lineplot in video_to_lineplot mode
+                    if (self.sync_state == "video_to_lineplot" and 
+                        self.lineplot is not None):
+                        self.lineplot._update_window_position()
             return
         
         # Handle other attributes

@@ -37,6 +37,7 @@ class IntegratedLinePlot(QWidget):
         self.plot_widget = pg.PlotWidget(background='white')
         self.plot_item = self.plot_widget.plotItem
         self.vb = self.plot_item.vb
+        self.vb.setMenuEnabled(False)
         
         self.plot_items = []
         self.label_items = []
@@ -90,9 +91,6 @@ class IntegratedLinePlot(QWidget):
         self.vb.setMouseEnabled(x=False, y=False)
         
         
-        # Disable context menu on the plot
-        self.vb.setMenuEnabled(False)
-        
         # Make time marker more prominent in this mode
         self.time_marker.setPen(pg.mkPen(color='r', width=3, style=pg.QtCore.Qt.SolidLine))
         self.time_marker.setZValue(1000)
@@ -111,8 +109,6 @@ class IntegratedLinePlot(QWidget):
         # Enable full mouse interactions with the plot
         self.vb.setMouseEnabled(x=True, y=True)
         
-        # Enable context menu
-        self.vb.setMenuEnabled(True)
         
         # Hide time marker in interactive mode
         self.time_marker.hide()
@@ -161,8 +157,7 @@ class IntegratedLinePlot(QWidget):
 
     
     def update_plot(self, t0: Optional[float] = None, 
-                   t1: Optional[float] = None, 
-                   viewer_time: Optional[float] = None) -> None:
+                   t1: Optional[float] = None) -> None:
         """Update the line plot with current data and time window."""
         if not hasattr(self.app_state, 'ds'):
             return
@@ -197,12 +192,9 @@ class IntegratedLinePlot(QWidget):
                 preserve_xlim = (t0, t1)
             apply_view_settings(self.plot_item, self.app_state, preserve_xlim)
         
-        # Update time marker
-        if viewer_time is not None:
-            self.time_marker.setValue(viewer_time)
-        elif hasattr(self.app_state, 'current_time'):
-            current_time = self.app_state.current_frame / self.app_state.ds.fps
-            self.time_marker.setValue(current_time)
+
+        current_time = self.app_state.current_frame / self.app_state.ds.fps
+        self.time_marker.setValue(current_time)
 
 
     def update_yrange(self, ymin: Optional[float], 
@@ -247,13 +239,3 @@ class IntegratedLinePlot(QWidget):
         """Get current y-axis limits."""
         _, y_range = self.vb.viewRange()
         return y_range
-    
-    @property
-    def ax(self):
-        """Compatibility property."""
-        return self.plot_item
-    
-    @property
-    def canvas(self):
-        """Compatibility property."""
-        return self.plot_widget

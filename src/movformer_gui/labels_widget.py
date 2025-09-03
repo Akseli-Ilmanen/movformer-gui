@@ -474,7 +474,7 @@ class LabelsWidget(QWidget):
         self.current_motif_pos = None
         self.current_motif_id = None
 
-        # Save updated labels back to dataset
+        # Save updated labels back t3o dataset
         self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
         # Update plot
@@ -495,20 +495,8 @@ class LabelsWidget(QWidget):
         start_time = self.current_motif_pos[0] / self.app_state.ds.fps
         end_time = self.current_motif_pos[1] / self.app_state.ds.fps
         
-        self.app_state.current_frame = round(self.current_motif_pos[0])
-
-
-
-        # Resume if paused before jumping
-        if self.app_state.stream.is_paused:
-            self.app_state.stream.resume()
         
-        # Sync with audio via pyav
         if self.app_state.video_path and self.app_state.audio_path:
-            self.app_state.stream.jump_to_segment(start_time, end_time)
-
-
-        # Video only
+            self.app_state.stream.play_segment(start_time, end_time)
         elif not self.app_state.audio_path:
-            self.app_state.stream.jump_to_segment(start_time, end_time)
-
+            self.app_state.stream.play_segment(start_time, end_time)

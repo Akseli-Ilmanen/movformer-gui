@@ -141,19 +141,15 @@ class NavigationWidget(QWidget):
         
         self.app_state.sync_state = new_mode
 
-        
-        # Update lineplot mode if available
-        if self.lineplot:
-            self.lineplot.set_sync_mode(new_mode)
-        
         # Emit signal for other components
         self.sync_mode_changed.emit(new_mode)
         
-        # Update displays if ready
-        if self.app_state.ready:
-            if self.data_widget:
-                self.data_widget._update_video_audio()
-                self.data_widget._update_plot()
+        # Update lineplot mode if available
+        if self.lineplot and self.app_state.ready:
+            self.lineplot.set_sync_mode(new_mode)
+            self.lineplot.update_plot()
+        
+
 
     def _trial_change_consequences(self):
         """Handle consequences of trial changes."""
