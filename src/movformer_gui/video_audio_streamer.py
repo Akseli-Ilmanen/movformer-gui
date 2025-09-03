@@ -46,6 +46,7 @@ class VideoAudioStreamViewer:
         self.current_position = 0.0
         self.seek_requested = False
         self.seek_position = 0.0
+        self.seek_complete = threading.Event()  # Synchronization for seek completion
         
         # Video components
         self.video_container = None
@@ -153,14 +154,18 @@ class VideoAudioStreamViewer:
                     self.current_position = self.seek_position
                     self.start_time = time.time() - self.seek_position
                     self.seek_requested = False
+                    self.seek_complete.set()  # Signal seek completion
                 
                 if self.is_paused:
-                    time.sleep(0.1)
+                    time.sleep(0.01)
                     continue
                 
                 # Decode and queue frames
                 for packet in self.video_container.demux(self.video_stream):
-                    if not self.is_running or self.seek_requested or self.is_paused:
+                    if not self.is_running or self.seek_requested:
+                        break
+                    
+                    if self.is_paused:
                         break
                     
                     for frame in packet.decode():
@@ -202,7 +207,7 @@ class VideoAudioStreamViewer:
                         time.sleep(0.01)
                 
                 if self.is_paused:
-                    time.sleep(0.1)
+                    time.sleep(0.01)
                     continue
                 
                 # Decode and play audio
@@ -239,32 +244,69 @@ class VideoAudioStreamViewer:
             except queue.Empty:
                 break
     
-    def seek(self, position: Union[float, int]):
-        """Seek to specific position in seconds."""
+    def seek(self, position: Union[float, int], wait_for_completion: bool = True) -> bool:
+        """
+        Seek to specific position in seconds.
+        
+        Args:
+            position: Target position in seconds
+            wait_for_completion: If True, blocks until seek is complete
+            
+        Returns:
+            True if seek completed successfully, False if timeout
+        """
         position = max(0, min(position, self.total_duration))
         self.seek_position = position
+        self.seek_complete.clear()  # Reset the event
         self.seek_requested = True
         self.app_state.current_frame = round(position * self.app_state.ds.fps)
-        time.sleep(0.1)  # Brief wait for seek processing
+        
+        if wait_for_completion:
+            # Wait up to 2 seconds for seek to complete
+            return self.seek_complete.wait(timeout=2.0)
+        return True
     
     def play_segment(self, start_time: float, end_time: float):
-        """Play segment from start_time to end_time, then pause."""
-        self.seek(start_time)
+        print(f"[play_segment] Starting: current_pos={self.current_position:.2f}, target={start_time:.2f}")
         
-        def pause_at_end():
-            while self.is_running and self.current_position < end_time:
-                time.sleep(0.1)
+        was_paused = self.is_paused
+        if not was_paused:
             self.pause()
+            print(f"[play_segment] Paused playback")
+            time.sleep(0.05)
+        
+        if not self.seek(start_time, wait_for_completion=True):
+            print(f"[play_segment] Seek timeout!")
+            return
+        
+        print(f"[play_segment] Seek complete: current_pos={self.current_position:.2f}")
+        self.resume()
+        print(f"[play_segment] Resumed playback")
+        
+        # Start monitoring thread for end position
+        def pause_at_end():
+            while self.is_running and not self.is_paused:
+                if self.current_position >= end_time:
+                    self.pause()
+                    break
+                time.sleep(0.01)  # Check more frequently
         
         threading.Thread(target=pause_at_end, daemon=True).start()
     
     def pause(self):
         """Pause playback."""
         self.is_paused = True
+        # Record pause time for proper resume synchronization
+        if self.start_time is not None:
+            elapsed = time.time() - self.start_time
+            self.pause_position = self.current_position
     
     def resume(self):
         """Resume playback."""
-        self.is_paused = False
+        if self.is_paused:
+            # Recalculate start_time based on current position
+            self.start_time = time.time() - self.current_position
+            self.is_paused = False
     
     def toggle_pause(self):
         """Toggle between pause and play."""
