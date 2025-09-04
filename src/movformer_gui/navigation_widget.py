@@ -38,8 +38,9 @@ class NavigationWidget(QWidget):
         self.sync_toggle_btn = QComboBox()
         self.sync_toggle_btn.setObjectName("sync_toggle_btn")
         self.sync_toggle_btn.addItems([
-            "Sync: Video → LinePlot (Follow Video)", 
-            "Sync: LinePlot → Video (Interactive Plot)"
+            "Sync: Napari-Video → LinePlot (Follow Video)", 
+            "Sync: LinePlot → Napari-Video (Interactive Plot)"
+            "Sync: Napari-PyavStream → LinePlot (Follow Video)",
         ])
         self.sync_toggle_btn.currentIndexChanged.connect(self.toggle_sync)
 
@@ -64,10 +65,13 @@ class NavigationWidget(QWidget):
 
         # Initialize sync state from app_state
         sync_state = getattr(self.app_state, "sync_state", None)
-        if sync_state == "lineplot_to_video":
-            self.sync_toggle_btn.setCurrentIndex(1)
-        elif sync_state == "video_to_lineplot":
+        if sync_state == "video_to_lineplot":
             self.sync_toggle_btn.setCurrentIndex(0)
+        elif sync_state == "lineplot_to_video":
+            self.sync_toggle_btn.setCurrentIndex(1)
+        elif sync_state == "pyav_to_lineplot":
+            self.sync_toggle_btn.setCurrentIndex(2)
+
         else:
             # Default to video_to_lineplot
             self.sync_toggle_btn.setCurrentIndex(0)
@@ -88,10 +92,10 @@ class NavigationWidget(QWidget):
         
         if current_index == 0:
             new_mode = "video_to_lineplot"
-        else:
+        elif current_index == 1:
             new_mode = "lineplot_to_video"
-        
-        self.app_state.sync_state = new_mode
+        elif current_index == 2:
+            new_mode = "pyav_to_lineplot"
 
         # Emit signal for other components
         self.sync_mode_changed.emit(new_mode)

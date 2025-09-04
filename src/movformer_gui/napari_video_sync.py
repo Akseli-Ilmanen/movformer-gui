@@ -22,9 +22,9 @@ from audioio import AudioLoader, PlayAudio
 
 
 
-class SegmentPlayer(QObject):
+class NapariVideoPlayer(QObject):
     """
-    Simplified manager for playing video segments with asynchronous audio.
+    Use napari-video to load entire video. Audio not loaded unless in spectrogram mode. Audio playback only possible for segments.
     """
     
     frame_changed = Signal(int)  # Emitted when video frame changes

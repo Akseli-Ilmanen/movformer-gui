@@ -7,7 +7,7 @@ from napari.viewer import Viewer
 from qt_niu.collapsible_widget import CollapsibleWidgetContainer
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QSlider
 
-from movformer_gui.napari_video_sync import SegmentPlayer
+from movformer_gui.napari_video_sync import NapariVideoPlayer
 
 from .app_state import ObservableAppState
 from .data_widget import DataWidget
@@ -68,7 +68,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         self.labels_widget = LabelsWidget(self.viewer, self.app_state)
         self.shortcuts_widget = ShortcutsWidget(self.app_state)
         self.navigation_widget = NavigationWidget(self.viewer, self.app_state)
-        self.sync_manager = SegmentPlayer(self.viewer, self.app_state, None)
+        self.sync_manager = NapariVideoPlayer(self.viewer, self.app_state, None)
         self.data_widget = DataWidget(self.viewer, self.app_state, self)
         
 

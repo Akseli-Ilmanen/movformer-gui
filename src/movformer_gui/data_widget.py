@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 
 from .data_loader import load_dataset
-from .napari_video_sync import SegmentPlayer
+from .napari_video_sync import NapariVideoPlayer
 from .audio_cache import SharedAudioCache
 from movformer.utils.xr_utils import sel_valid
 import napari
@@ -49,7 +49,7 @@ class DataWidget(DataLoader, QWidget):
         self.setLayout(QFormLayout())
         self.app_state = app_state
         self.meta_widget = meta_widget
-        self.sync_manager: Optional[SegmentPlayer] = None
+        self.sync_manager: Optional[NapariVideoPlayer] = None
         self.lineplot = None  # Will be set after creation
         self.labels_widget = None  # Will be set after creation
         self.plots_widget = None  # Will be set after creation
@@ -560,7 +560,7 @@ class DataWidget(DataLoader, QWidget):
                 audio_path = None
 
         # Create new sync manager to handle napari video + audio coordination
-        self.sync_manager = SegmentPlayer(
+        self.sync_manager = NapariVideoPlayer(
             viewer=self.viewer,
             app_state=self.app_state,
             video_path=self.app_state.video_path,

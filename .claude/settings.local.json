@@ -11,7 +11,8 @@
       "Bash(find:*)",
       "mcp__filesystem-readonly__list_directory",
       "Bash(dir:*)",
-      "Read(C:\\Users\\Admin\\Documents\\Akseli\\Code\\MovFormer\\movformer/**)"
+      "Read(C:\\Users\\Admin\\Documents\\Akseli\\Code\\MovFormer\\movformer/**)",
+      "Read(/C:\\Users\\Admin\\Documents\\Akseli\\Code\\movformer-gui/**)"
     ],
     "deny": [],
     "ask": []

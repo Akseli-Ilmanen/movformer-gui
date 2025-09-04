@@ -74,6 +74,51 @@ pip install -e ".[testing]"
 - Color-coded motif visualization
 - Export functionality for labeled data
 
+**PlotsWidget** (`plot_widgets.py`) - Plot configuration and control:
+- Y-axis limits and window size settings for line plots and spectrograms
+- Buffer settings for audio and spectrogram caching
+- Jump size configuration for interactive navigation
+- Sync mode awareness - different behavior in video vs interactive modes
+- Real-time parameter updates that propagate to LineePlot widget
+
+**NavigationWidget** (`navigation_widget.py`) - Trial navigation and sync mode control:
+- Trial selection combo box with prev/next navigation buttons
+- Sync mode toggle between three states: Video→LinePlot, LinePlot→Video, PyavStream→LinePlot
+- Coordinates trial changes across DataWidget and LinePlot
+- Manages synchronization state in AppState
+
+
+
+claude code TO DO: 
+- combine VideoAudioStreamViewer and NapariVideoPlayer into a single file.
+- I would like 
+ 2 classes that share properties from parent class VideoSync (emitting frames changed etc) and syncing with lineplot via 
+ data_widget. T
+
+**VideoAudioStreamViewer** (`video_audio_streamer.py`) - Advanced streaming video player:
+- PyAV-based video decoding with separate threading for frames and audio
+- Real-time synchronization with frame-accurate seeking
+- Audio playback using PyAudio with synchronized timing
+- Queue-based buffering system for smooth playback
+- Segment playback support for motif preview
+
+**NapariVideoPlayer** (`napari_video_sync.py`) - Napari-integrated video player:
+- Uses napari-video plugin for full video loading into memory
+- Segment playback with synchronized audio using audioio library
+- Frame-based seeking and playback control through napari's built-in controls
+- Audio rate adjustment for different playback speeds
+- Simpler implementation compared to streaming approach
+
+
+
+
+**SpectrogramPlot** (`pyqt_spectrogram_plot.py`) - PyQtGraph-based spectrogram visualization:
+- Real-time spectrogram computation with smart buffering system
+- Interactive colorbar with customizable dB levels
+- Synchronized with line plots through shared X-axis
+- Cached computation results to avoid recomputing overlapping time ranges
+- Integration with SharedAudioCache for efficient audio loading
+
 ### Data Flow
 
 1. **Loading**: DataWidget loads NetCDF dataset → populates AppState → creates dynamic UI controls
