@@ -2,8 +2,7 @@
 
 from qtpy.QtWidgets import (QHBoxLayout, QPushButton, QWidget, QComboBox, 
                             QSlider, QLabel, QVBoxLayout)
-from qtpy.QtCore import QTimer, Qt, Signal
-from typing import Optional
+from qtpy.QtCore import Signal
 from napari import Viewer
 
 
@@ -12,14 +11,11 @@ class NavigationWidget(QWidget):
     
     sync_mode_changed = Signal(str)
     
-    def __init__(self, viewer: Viewer, app_state, parent=None, 
-                 time_slider=None, time_label=None):
+    def __init__(self, viewer: Viewer, app_state, parent=None):
         super().__init__(parent=parent)
         self.viewer = viewer
         self.app_state = app_state
         self.data_widget = None
-        self.time_slider = time_slider
-        self.time_label = time_label
         self.lineplot = None  # Will be set after creation
 
         # Trial selection combo
@@ -65,8 +61,6 @@ class NavigationWidget(QWidget):
         main_layout.addLayout(row3)
         self.setLayout(main_layout)
 
-        if self.time_slider is not None:
-            self._setup_time_slider()
 
         # Initialize sync state from app_state
         sync_state = getattr(self.app_state, "sync_state", None)
@@ -86,49 +80,7 @@ class NavigationWidget(QWidget):
     def set_lineplot(self, lineplot):
         """Set reference to lineplot widget."""
         self.lineplot = lineplot
-        
-    def _setup_time_slider(self) -> None:
-        """Configure the externally provided time slider for segment selection."""
-        self.time_slider.setOrientation(Qt.Horizontal)
-        self.time_slider.setValue(0)
-        self.time_slider.sliderReleased.connect(self.on_slider_clicked)
-        self.time_label = QLabel("0 / 0")
-        self._last_slider_value = 0
-        self.slider_clicks_enabled = False
-
-        self.click_debounce_timer = QTimer()
-        self.click_debounce_timer.setSingleShot(True)
-        # Connect both debounce and enable logic if needed in future
-        self.click_debounce_timer.timeout.connect(self._jump_to_segment_after_debounce)
-
-
-
-    def on_slider_clicked(self):
-        """Handle user clicks on slider (only in lineplot_to_video mode)."""
-            
-        self.app_state.current_frame = self.time_slider.value()
-        self.click_debounce_timer.start(500)
-
-    def _jump_to_segment_after_debounce(self):
-        """Jump to segment after debounce period."""
-        if hasattr(self.app_state, 'stream'):
-            current_time = self.app_state.current_frame / self.app_state.ds.fps
-            self.app_state.stream.jump_to_segment(current_time)
-
-    def update_slider(self):
-        """Update slider position from app_state."""
-        if self.time_slider:
-            self.time_slider.blockSignals(True)
-            self.time_slider.setValue(round(self.app_state.current_frame))
-            self.time_slider.blockSignals(False)
-            self._update_slider_display()
-       
-    def _update_slider_display(self):
-        """Update the time label display."""
-        if self.time_label and hasattr(self.app_state, 'num_frames'):
-            current = self.time_slider.value()
-            total = self.app_state.num_frames - 1
-            self.time_label.setText(f"{current} / {total}")   
+    
      
     def toggle_sync(self) -> None:
         """Toggle between sync modes."""

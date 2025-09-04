@@ -1,4 +1,4 @@
-"""Refactored observable application state with single source of truth for time."""
+"""Refactored observable application state with napari video sync support."""
 
 import contextlib
 from pathlib import Path
@@ -20,6 +20,7 @@ class AppStateSpec:
     # Variable name: (type, default, save_to_yaml, signal_type)
     VARS = {
         "ds": (xr.Dataset | None, None, False, object),
+        "fps_playback": (float, 30.0, True, float),
         "trials": (list[int], [], False, object),
         "file_path": (str | None, None, True, str),
         "video_folder": (str | None, None, True, str),
@@ -31,7 +32,6 @@ class AppStateSpec:
         "current_frame": (int, 0, False, int),  # PRIMARY source of truth
         "num_frames": (int, 0, False, int),
         "_info_data": (dict[str, Any], {}, False, object),
-        "fps_playback": (float, 30.0, True, float),
         "sync_state": (str | None, None, True, object),
         "ymin": (float | None, None, True, object),
         "ymax": (float | None, None, True, object),
@@ -73,6 +73,7 @@ class ObservableAppState(QObject):
     
     data_updated = Signal()
     current_time_changed = Signal(float)  # Special signal for computed property
+    sync_state_changed = Signal(str)  # Signal for sync mode changes
     
     def __init__(self, yaml_path: str | None = None, auto_save_interval: int = 30000):
         super().__init__()
@@ -84,11 +85,10 @@ class ObservableAppState(QObject):
         self._auto_save_timer = QTimer()
         self._auto_save_timer.timeout.connect(self.save_to_yaml)
         self._auto_save_timer.start(auto_save_interval)
-        
-        # Widget references
-        self.navigation_widget = None
+
         self.lineplot = None
-    
+        # Reference to sync manager (replaces old stream)
+        self.sync_manager = None
 
     def _get_fps(self) -> Optional[float]:
         """Get FPS from dataset, with caching."""
@@ -113,7 +113,8 @@ class ObservableAppState(QObject):
     def __setattr__(self, name, value):
         # Handle special attributes that don't go through state
         if name in ("_state", "_fps_cache", "settings", 
-                   "_yaml_path", "_auto_save_timer", "navigation_widget", "lineplot"):
+                   "_yaml_path", "_auto_save_timer", "navigation_widget", 
+                   "lineplot", "sync_manager"):
             super().__setattr__(name, value)
             return
         
@@ -126,11 +127,9 @@ class ObservableAppState(QObject):
             signal = getattr(self, f"{name}_changed", None)
             if signal and old_value != value:
                 signal.emit(value)
-            
-            # Handle specific updates
-            if name == "fps_playback":
-                self.settings.application.playback_fps = value
-            elif name == "ds":
+        
+                    
+            if name == "ds":
                 # Clear FPS cache when dataset changes
                 self._fps_cache = None
                 
@@ -138,17 +137,12 @@ class ObservableAppState(QObject):
                 # Update lineplot mode when sync state changes
                 if self.lineplot is not None:
                     self.lineplot.set_sync_mode(value)
-            
-            elif name == "current_frame":
                 
+                # Emit special sync state signal
                 if old_value != value:
-                    if self.navigation_widget is not None: 
-                        self.navigation_widget.update_slider()
-                        
-                    # Update lineplot in video_to_lineplot mode
-                    if (self.sync_state == "video_to_lineplot" and 
-                        self.lineplot is not None):
-                        self.lineplot._update_window_position()
+                    self.sync_state_changed.emit(value)
+            
+
             return
         
         # Handle other attributes

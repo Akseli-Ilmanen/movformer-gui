@@ -11,7 +11,6 @@ video_path: C:\Users\Admin\Documents\Akseli\VidData\20250527_01_Freddy\2025-05-2
 recompute_threshold: 0.5
 nfft: 1024
 hop_frac: 0.5
-fps_playback: 30.0
 vmax_db: 20.0
 ymax: 150.0
 vmin_db: -120.0

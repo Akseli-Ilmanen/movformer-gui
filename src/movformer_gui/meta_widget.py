@@ -7,12 +7,16 @@ from napari.viewer import Viewer
 from qt_niu.collapsible_widget import CollapsibleWidgetContainer
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QSlider
 
+from movformer_gui.napari_video_sync import SegmentPlayer
+
 from .app_state import ObservableAppState
 from .data_widget import DataWidget
 from .labels_widget import LabelsWidget
 from .integrated_lineplot import IntegratedLinePlot
 from .navigation_widget import NavigationWidget
 from .plot_widgets import PlotsWidget
+
+
 from .shortcuts_dialog import ShortcutsWidget
 from qtpy.QtWidgets import QLabel, QHBoxLayout
 
@@ -21,12 +25,12 @@ from .integrated_lineplot import IntegratedLinePlot
 
 class MetaWidget(CollapsibleWidgetContainer):
 
-    def __init__(self, napari_viewer: Viewer, parent=None):
+    def __init__(self, napari_viewer: Viewer):
         """Initialize the meta-widget."""
         super().__init__()
 
         # Store the napari viewer reference
-        self.napari_viewer = napari_viewer
+        self.viewer = napari_viewer
 
         # Create centralized app_state with YAML persistence
         yaml_path = self._default_yaml_path()
@@ -38,61 +42,39 @@ class MetaWidget(CollapsibleWidgetContainer):
         self.app_state.load_from_yaml()
 
         # Initialize all widgets with app_state
-        self._create_widgets(napari_viewer)
+        self._create_widgets()
 
 
         self.collapsible_widgets[1].expand()
 
 
-        self._bind_global_shortcuts(napari_viewer, self.labels_widget, self.data_widget)
+        self._bind_global_shortcuts(self.labels_widget, self.data_widget)
 
 
-    def _create_widgets(self, napari_viewer: Viewer):
+    def _create_widgets(self):
         """Create all widgets with app_state passed to each one."""
 
 
-      
-        # Create a vertical container for both slider and lineplot
-        slider_lineplot_container = QWidget()
-        container_layout = QVBoxLayout()
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(0)
 
-        # Time slider and label
+        # LinePlot widget docked at the bottom
+        self.lineplot = IntegratedLinePlot(self.viewer, self.app_state)
+        self.viewer.window.add_dock_widget(self.lineplot, area="bottom")
 
-        time_slider = QSlider()
-        time_label = QLabel("0 / 0")
-        time_label.setToolTip("Current frame / All frames")
 
-        # Place slider and label in a horizontal layout
-        slider_layout = QHBoxLayout()
-        slider_layout.setContentsMargins(0, 0, 0, 0)
-        slider_layout.setSpacing(20)
-        slider_layout.addWidget(time_slider)
-        slider_layout.addWidget(time_label)
-        container_layout.addLayout(slider_layout)
 
-        # LinePlot widget
-        self.lineplot = IntegratedLinePlot(napari_viewer, self.app_state)
-        #self.lineplot = LinePlot(napari_viewer, self.app_state)
-        container_layout.addWidget(self.lineplot)
-
-        slider_lineplot_container.setLayout(container_layout)
-
-        # Add the combined container docked at bottom
-        napari_viewer.window.add_dock_widget(slider_lineplot_container, area="bottom")
 
         # Create all widgets with app_state
-        self.plots_widget = PlotsWidget(napari_viewer, self.app_state)
-        self.labels_widget = LabelsWidget(napari_viewer, self.app_state)
+        self.plots_widget = PlotsWidget(self.viewer, self.app_state)
+        self.labels_widget = LabelsWidget(self.viewer, self.app_state)
         self.shortcuts_widget = ShortcutsWidget(self.app_state)
-        self.navigation_widget = NavigationWidget(napari_viewer, self.app_state, time_slider=time_slider, time_label=time_label)
-        self.data_widget = DataWidget(napari_viewer, self.app_state, self)
+        self.navigation_widget = NavigationWidget(self.viewer, self.app_state)
+        self.sync_manager = SegmentPlayer(self.viewer, self.app_state, None)
+        self.data_widget = DataWidget(self.viewer, self.app_state, self)
         
-        
+
         # Set navigation_widget reference in app_state for property callback
-        self.app_state.navigation_widget = self.navigation_widget
         self.app_state.lineplot = self.lineplot
+        self.app_state.sync_manager = self.sync_manager
 
 
 
@@ -166,21 +148,47 @@ class MetaWidget(CollapsibleWidgetContainer):
             yaml_path.touch(exist_ok=True)
         return yaml_path
 
-    def _bind_global_shortcuts(self, viewer, labels_widget, data_widget):
+    def _override_napari_shortcuts(self):
+        """Aggressively unbind napari shortcuts at all levels."""
+        keys_to_override = [str(i) for i in range(10)]
+        
+        from napari.layers import Image, Points, Shapes, Labels, Tracks, Surface
+        layer_types = [Image, Points, Shapes, Labels, Tracks, Surface]
+        
+        for layer_type in layer_types:
+            for key in keys_to_override:
+                try:
+                    layer_type.bind_key(key, None)
+                except Exception as e:
+                    print(f"Could not unbind {key} from {layer_type.__name__}: {e}")
+
+        for key in keys_to_override:
+            try:
+    
+                if hasattr(self.viewer, 'keymap') and key in self.viewer.keymap:
+                    del self.viewer.keymap[key]
+                
+                if hasattr(self.viewer, '_keymap') and key in self.viewer._keymap:
+                    del self.viewer._keymap[key] 
+            except Exception as e:
+                print(f"Could not remove {key} from viewer keymap: {e}")
+                
+                
+    
+    def _bind_global_shortcuts(self, labels_widget, data_widget):
         """Bind all global shortcuts using napari's @viewer.bind_key syntax."""
 
 
         # Manually unbind previous keys.
-        Image.bind_key("1", None)
-        Image.bind_key("2", None)
-        Image.bind_key("space", None)
+        self._override_napari_shortcuts()
+   
 
 
-        # Pause/play video/audio
-        @viewer.bind_key("space", overwrite=True)
-        def toggle_play_pause(v):
-            self.data_widget.toggle_play_pause()
-
+        # # Pause/play video/audio
+        # @viewer.bind_key("space", overwrite=True)
+        # def toggle_play_pause(v):
+        #     self.data_widget.toggle_play_pause()
+        viewer = self.viewer
 
         @viewer.bind_key("m", overwrite=True)
         def next_trial(v):
@@ -252,7 +260,7 @@ class MetaWidget(CollapsibleWidgetContainer):
 
                 return label_func
 
-            viewer.bind_key(key, make_label_func(motif_key), overwrite=True)
+            self.viewer.bind_key(key, make_label_func(motif_key), overwrite=True)
 
         # In native napari GUI, oen can use:
         # - Ctr + Alt + P for play/pause the viewer

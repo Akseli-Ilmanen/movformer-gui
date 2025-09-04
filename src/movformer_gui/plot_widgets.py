@@ -180,6 +180,21 @@ class PlotsWidget(QWidget):
         """Check if we're in interactive mode."""
         return getattr(self.app_state, 'sync_state', '') == 'lineplot_to_video'
 
+    
+    def _adjust_window_size(self, factor: float):
+        """Adjust window_size by a multiplicative factor and update relevant fields."""
+        if not self._check_interactive_mode():
+            return
+        current = self._parse_float(self.window_s_edit.text())
+        if current is None:
+            current = self.app_state.get_with_default("window_size")
+
+        new_value = current * factor
+        self.window_s_edit.setText(str(new_value))
+        setattr(self.app_state, "window_size", new_value)
+
+
+
     def _adjust_ylim(self, factor: float):
         """Adjust y-axis limits (zoom in/out)."""
         if not self._check_interactive_mode() or not self.lineplot:

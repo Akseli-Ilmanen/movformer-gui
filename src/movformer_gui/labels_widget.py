@@ -29,6 +29,9 @@ import time
 from audioio import play
 import random
 import pyqtgraph as pg
+from contextlib import contextmanager
+from typing import Generator
+import threading
 
 
 class LabelsWidget(QWidget):
@@ -69,6 +72,11 @@ class LabelsWidget(QWidget):
         self.motif_mappings = load_motif_mapping(path)
         self._populate_motifs_table()
 
+        self._sync_disabled = False
+        self._in_labeling_operation = False  # Add flag to prevent re-entrance
+        self._operation_lock = threading.Lock()  # Thread-safe flag
+
+    
     
     def set_lineplot(self, lineplot):
         """Set the lineplot reference and connect click handler."""
@@ -158,33 +166,7 @@ class LabelsWidget(QWidget):
         self.lineplot.label_items.append(rect)
 
 
-    # OLD 
-    # def _draw_motif_rectangle(
-    #     self,
-    #     ax,
-    #     start_time: float,
-    #     end_time: float,
-    #     motif_id: int,
-    #     ylim: tuple[float, float],
-    # ):
-    #     """Draw a single motif rectangle."""
-    #     if motif_id not in self.motif_mappings:
-    #         return
-
-    #     color = self.motif_mappings[motif_id]["color"]
-
-    #     # Create rectangle
-    #     rect = Rectangle(
-    #         (start_time, ylim[0]),
-    #         end_time - start_time,
-    #         ylim[1] - ylim[0],
-    #         facecolor=color,
-    #         alpha=0.7,
-    #         linewidth=1,
-    #     )
-    #     rect.set_label("motif")  # Tag for identification
-    #     ax.add_patch(rect)
-
+ 
     def _setup_ui(self):
         """Set up the user interface."""
         layout = QVBoxLayout()
@@ -279,31 +261,76 @@ class LabelsWidget(QWidget):
             color_item.setBackground(qcolor)
             self.motifs_table.setItem(row, 2, color_item)
 
-    def activate_motif(self, motif_key):
-        """Activate a motif by shortcut: select row, set up for labeling, and scroll to row."""
-
-        # Convert key to motif ID using centralized1 mapping
-        motif_id = self.KEY_TO_MOTIF_ID.get(str(motif_key).lower(), motif_key)
-        # Check if motif ID is valid
-        if motif_id not in self.motif_mappings:
-            print(f"No motif defined for key {motif_key}")
+    @contextmanager
+    def _disable_sync_during_labeling(self) -> Generator[None, None, None]:
+        """Context manager to temporarily disable sync manager during labeling operations."""
+        
+        # Prevent re-entrance (event loop protection)
+        if self._in_labeling_operation:
+            # If already in a labeling operation, just yield without doing anything
+            yield
             return
-        # Set selected motif and start labeling
-        self.selected_motif_id = motif_id
-        # Find and select the corresponding row in the table
-        for row in range(self.motifs_table.rowCount()):
-            item = self.motifs_table.item(row, 0)  # ID column
-            if item and item.data(Qt.UserRole) == motif_id:
-                self.motifs_table.selectRow(row)
-                self.motifs_table.scrollToItem(item)
-                break
-        self.ready_for_click = True
-        self.first_click = None
-        self.second_click = None
+        
+        with self._operation_lock:
+            if self._in_labeling_operation:
+                yield
+                return
+                
+            self._in_labeling_operation = True
+        
+        sync_manager = getattr(self.app_state, 'sync_manager', None)
+        
+        # Store original state
+        was_monitoring = False
+        if sync_manager and hasattr(sync_manager, '_monitoring_enabled'):
+            was_monitoring = sync_manager._monitoring_enabled
+            sync_manager._monitoring_enabled = False
+        elif sync_manager:
+            sync_manager._monitoring_enabled = False
+            was_monitoring = True
+        
+        self._sync_disabled = True
+        
+        try:
+            yield
+        except Exception as e:
+            # Log the exception but don't re-raise to prevent event system issues
+            print(f"Exception in labeling operation: {e}")
+        finally:
+            # Always restore state
+            self._sync_disabled = False
+            if sync_manager:
+                sync_manager._monitoring_enabled = was_monitoring
+            
+            with self._operation_lock:
+                self._in_labeling_operation = False
 
-        print(
-            f"Ready to label motif {motif_id} ({self.motif_mappings[motif_id]['name']}) - click twice to define region"
-        )
+
+    def activate_motif(self, motif_key):
+        """Activate a motif by shortcu1t: select row, set up for labeling, and scroll to row."""
+        with self._disable_sync_during_labeling():
+            # Convert key to motif ID using centralized1 mapping
+            motif_id = self.KEY_TO_MOTIF_ID.get(str(motif_key).lower(), motif_key)
+            # Check if motif ID is valid
+            if motif_id not in self.motif_mappings:
+                print(f"No motif defined for key {motif_key}")
+                return
+            # Set selected motif and start labeling
+            self.selected_motif_id = motif_id
+            # Find and select the corresponding row in the table
+            for row in range(self.motifs_table.rowCount()):
+                item = self.motifs_table.item(row, 0)  # ID column
+                if item and item.data(Qt.UserRole) == motif_id:
+                    self.motifs_table.selectRow(row)
+                    self.motifs_table.scrollToItem(item)
+                    break
+            self.ready_for_click = True
+            self.first_click = None
+            self.second_click = None
+
+            print(
+                f"Ready to label motif {motif_id} ({self.motif_mappings[motif_id]['name']}) - click twice to define region"
+            )
 
     def _on_plot_clicked(self, click_info):
         """Handle mouse clicks on the lineplot widget.
@@ -311,6 +338,7 @@ class LabelsWidget(QWidget):
         Args:
             click_info: dict with 'x' (time coordinate) and 'button' (Qt button constant)
         """
+        
         x_clicked = click_info['x']
         button = click_info['button']
         
@@ -394,92 +422,93 @@ class LabelsWidget(QWidget):
 
     def _apply_motif(self):
         """Apply the selected motif to the selected time range."""
-        if self.first_click is None or self.second_click is None:
-            return
+        with self._disable_sync_during_labeling():
+            if self.first_click is None or self.second_click is None:
+                return
 
-        # Get current labels from app_state
-        ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+            # Get current labels from app_state
+            ds_kwargs = self.app_state.get_ds_kwargs()
+            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
 
-        start_idx = self.first_click
-        end_idx = self.second_click
+            start_idx = self.first_click
+            end_idx = self.second_click
 
-        # Handle overlapping labels (as in MATLAB code)
-        if labels[end_idx] != 0:
-            end_idx = end_idx - 1
+            # Handle overlapping labels (as in MATLAB code)
+            if labels[end_idx] != 0:
+                end_idx = end_idx - 1
 
-        # Apply the new label
-        labels[start_idx : end_idx + 1] = self.selected_motif_id
+            # Apply the new label
+            labels[start_idx : end_idx + 1] = self.selected_motif_id
 
-        # Reset selection
-        self.first_click = None
-        self.second_click = None
-        self.ready_for_click = False
+            # Reset selection
+            self.first_click = None
+            self.second_click = None
+            self.ready_for_click = False
 
-        # Save updated labels back to dataset
-        self.app_state.ds["labels"].loc[ds_kwargs] = labels
+            # Save updated labels back to dataset
+            self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
-        # Update plot
-        time_data  = self.app_state.ds.time.values
-        self.plot_all_motifs(time_data, labels)
+            # Update plot
+            time_data  = self.app_state.ds.time.values
+            self.plot_all_motifs(time_data, labels)
 
     def _delete_motif(self):
+        with self._disable_sync_during_labeling():
+            if self.current_motif_pos is None:
+                return
 
-        if self.current_motif_pos is None:
-            return
+            start, end = self.current_motif_pos
 
-        start, end = self.current_motif_pos
-
-        # Get current labels from app_state
-        ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+            # Get current labels from app_state
+            ds_kwargs = self.app_state.get_ds_kwargs()
+            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
 
-        # Clear labels in the selected range (set to 0)
-        labels[start : end + 1] = 0
+            # Clear labels in the selected range (set to 0)
+            labels[start : end + 1] = 0
 
-        # Clear selection
-        self.current_motif_pos = None
-        self.current_motif_id = None
+            # Clear selection
+            self.current_motif_pos = None
+            self.current_motif_id = None
 
-        # Save updated labels back to dataset
-        self.app_state.ds["labels"].loc[ds_kwargs] = labels
+            # Save updated labels back to dataset
+            self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
-        # Update plot
-        time_data  = self.app_state.ds.time.values
-        self.plot_all_motifs(time_data, labels)
+            # Update plot
+            time_data  = self.app_state.ds.time.values
+            self.plot_all_motifs(time_data, labels)
 
     def _edit_motif(self):
         """Enter edit mode for adjusting motif boundaries."""
+        with self._disable_sync_during_labeling():
+            if self.current_motif_pos is None or self.first_click is None or self.second_click is None:
+                return
 
-        if self.current_motif_pos is None or self.first_click is None or self.second_click is None:
-            return
+            old_start, old_end = self.current_motif_pos
 
-        old_start, old_end = self.current_motif_pos
+            # Get current labels from app_state
+            ds_kwargs = self.app_state.get_ds_kwargs()
+            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
-        # Get current labels from app_state
-        ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+            
+            
+            # Clear labels in the selected range (set to 0)
+            labels[old_start : old_end + 1] = 0
 
-        
-        
-        # Clear labels in the selected range (set to 0)
-        labels[old_start : old_end + 1] = 0
+            new_start, new_end = self.first_click, self.second_click
+            labels[new_start : new_end + 1] = self.selected_motif_id
 
-        new_start, new_end = self.first_click, self.second_click
-        labels[new_start : new_end + 1] = self.selected_motif_id
+            # Clear current selection
+            self.current_motif_pos = None
+            self.current_motif_id = None
 
-        # Clear current selection
-        self.current_motif_pos = None
-        self.current_motif_id = None
+            # Save updated labels back t3o dataset
+            self.app_state.ds["labels"].loc[ds_kwargs] = labels
 
-        # Save updated labels back t3o dataset
-        self.app_state.ds["labels"].loc[ds_kwargs] = labels
-
-        # Update plot
-        time_data  = self.app_state.ds.time.values
-        self.plot_all_motifs(time_data, labels)
+            # Update plot
+            time_data  = self.app_state.ds.time.values
+            self.plot_all_motifs(time_data, labels)
 
     
     
@@ -491,15 +520,12 @@ class LabelsWidget(QWidget):
         if not self.current_motif_id or len(self.current_motif_pos) != 2:
             return
 
+        
+    
+        # Use new sync manager instead of old stream
+        if hasattr(self.app_state, 'sync_manager') and self.app_state.sync_manager:
 
-        start_time = self.current_motif_pos[0] / self.app_state.ds.fps
-        end_time = self.current_motif_pos[1] / self.app_state.ds.fps
-        
-        
-        if self.app_state.stream.is_paused:
-            self.app_state.stream.resume()
-            
-        if self.app_state.video_path and self.app_state.audio_path:
-            self.app_state.stream.jump_to_segment(start_time, end_time)
-        elif not self.app_state.audio_path:
-            self.app_state.stream.jump_to_segment(start_time, end_time)
+            start_frame = self.current_motif_pos[0]
+            end_frame = self.current_motif_pos[1]
+
+            self.app_state.sync_manager.play_segment(start_frame, end_frame)

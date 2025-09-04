@@ -55,18 +55,12 @@ class IntegratedLinePlot(QWidget):
         # Connect click handler only in lineplot_to_video mode
         self.plot_widget.scene().sigMouseClicked.connect(self._handle_click)
         
-        # Timer for smooth window updates in video_to_lineplot mode
-        self.window_update_timer = QTimer()
-        self.window_update_timer.timeout.connect(self._update_window_position)
-        self.window_update_timer.start(33)  # ~30 FPS for smooth following
+  
         
         # Store interaction state
         self._interaction_enabled = True
         self._last_window_center = None
-        
-        # Connect state changes
-        if hasattr(self.app_state, 'sync_state_changed'):
-            self.app_state.sync_state_changed.connect(self._on_sync_mode_changed)
+
     
     def _on_sync_mode_changed(self, sync_state: str) -> None:
         """Handle sync mode changes."""
@@ -120,8 +114,6 @@ class IntegratedLinePlot(QWidget):
         if not hasattr(self.app_state, 'sync_state'):
             return
             
-        if self.app_state.sync_state != "video_to_lineplot":
-            return
             
         if not hasattr(self.app_state, 'current_frame') or not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
             return
@@ -142,8 +134,6 @@ class IntegratedLinePlot(QWidget):
         y_max = self.app_state.get_with_default('ymax')
         
         # Update view range without triggering signals
-
-
         if y_min is not None and y_max is not None:
             self.vb.setRange(xRange=(x_min, x_max), yRange=(y_min, y_max), padding=0)
         else:

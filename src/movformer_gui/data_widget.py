@@ -22,12 +22,13 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 
 from .data_loader import load_dataset
-from .video_audio_streamer import VideoAudioStreamViewer
+from .napari_video_sync import SegmentPlayer
 from .audio_cache import SharedAudioCache
 from movformer.utils.xr_utils import sel_valid
 import napari
 from movement.napari.loader_widgets import DataLoader
 from pathlib import Path
+from typing import Optional
 
 class DataWidget(DataLoader, QWidget):
 
@@ -48,6 +49,7 @@ class DataWidget(DataLoader, QWidget):
         self.setLayout(QFormLayout())
         self.app_state = app_state
         self.meta_widget = meta_widget
+        self.sync_manager: Optional[SegmentPlayer] = None
         self.lineplot = None  # Will be set after creation
         self.labels_widget = None  # Will be set after creation
         self.plots_widget = None  # Will be set after creation
@@ -84,6 +86,8 @@ class DataWidget(DataLoader, QWidget):
             self.video_folder_edit.setText(self.app_state.video_folder)
         if self.app_state.audio_folder:
             self.audio_folder_edit.setText(self.app_state.audio_folder)
+        if self.app_state.tracking_folder:
+            self.tracking_folder_edit.setText(self.app_state.tracking_folder)
 
 
 
@@ -271,7 +275,7 @@ class DataWidget(DataLoader, QWidget):
             combo.currentTextChanged.connect(self._on_combo_changed)
             combo.addItems(["None"])
             self.layout().addRow("Cameras:", combo)
-        
+
         # 2. Playback FPS second
         self.fps_playback_edit = QLineEdit()
         self.fps_playback_edit.setObjectName("fps_playback_edit")
@@ -279,8 +283,6 @@ class DataWidget(DataLoader, QWidget):
         self.fps_playback_edit.editingFinished.connect(self._on_fps_changed)
         self.layout().addRow("Playback FPS:", self.fps_playback_edit)
         self.controls.append(self.fps_playback_edit)
-        
-        # 3. Mics third
         if "mics" in self.type_vars_dict.keys():
             self._create_combo_widget("mics", self.type_vars_dict["mics"])
         
@@ -418,12 +420,17 @@ class DataWidget(DataLoader, QWidget):
             self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials[0]))
             self.app_state.trials_sel =  int(self.app_state.trials[0])
 
-  
+    
     def _on_fps_changed(self):
         """Handle playback FPS change from UI."""
-        fps = float(self.fps_playback_edit.text())
-        self.app_state.fps_playback = fps
- 
+        fps_playback = float(self.fps_playback_edit.text())
+        self.app_state.fps_playback = fps_playback
+
+        # Update the playback settings in the viewer
+        qt_dims = self.viewer.window.qt_viewer.dims
+        slider_widget = qt_dims.slider_widgets[0]
+        slider_widget._update_play_settings(fps=fps_playback, loop_mode="once", frame_range=None)
+
 
     def _update_trial_condition_values(self):
         """Update the trial condition value dropdown based on selected key."""
@@ -503,18 +510,27 @@ class DataWidget(DataLoader, QWidget):
             show_error(f"Error updating plot: {e}")
 
 
+
+
+
     def _update_video_audio(self):
-        """Update video and audio if not none."""
+        """Update video and audio using napari video plugin and new sync manager."""
         if not self.app_state.ready or not self.app_state.video_folder:
             return
-        self.navigation_widget.slider_clicks_enabled = False
 
-        # Remove all previous layers with name "video"
+ 
+
+        # Remove all previous video layers
         for layer in list(self.viewer.layers):
             if layer.name == "video":
                 self.viewer.layers.remove(layer)
 
+        # Stop existing sync manager
+        if self.sync_manager:
+            self.sync_manager.stop()
+            self.sync_manager = None
 
+        # Get video file path from dataset
         video_file = (
             self.app_state.ds[self.app_state.cameras_sel]
             .sel(trials=self.app_state.trials_sel)
@@ -524,48 +540,46 @@ class DataWidget(DataLoader, QWidget):
         video_path = os.path.join(self.app_state.video_folder, video_file)
         self.app_state.video_path = os.path.normpath(video_path)
 
-
-        # Open video as the lowest layer
-        self.viewer.open(self.app_state.video_path, name="video")
+        # Load video using napari-video plugin
+        self.viewer.open(self.app_state.video_path, name="video", plugin="napari_video")
         video_layer = self.viewer.layers["video"]
         video_index = self.viewer.layers.index(video_layer)
-        self.viewer.layers.move(video_index, 0)
+        self.viewer.layers.move(video_index, 0)  # Move to bottom layer
+
+        # Set up audio path if available
+        if self.app_state.audio_folder and hasattr(self.app_state, 'mics_sel'):
+            try:
+                audio_file = (
+                    self.app_state.ds[self.app_state.mics_sel]
+                    .sel(trials=self.app_state.trials_sel)
+                    .values.item()
+                )
+                audio_path = os.path.join(self.app_state.audio_folder, audio_file)
+                self.app_state.audio_path = os.path.normpath(audio_path)
+            except (KeyError, AttributeError):
+                audio_path = None
+
+        # Create new sync manager to handle napari video + audio coordination
+        self.sync_manager = SegmentPlayer(
+            viewer=self.viewer,
+            app_state=self.app_state,
+            video_path=self.app_state.video_path,
+            audio_path=self.app_state.audio_path
+        )
+
+        # Connect sync manager frame changes to app state
+        self.sync_manager.frame_changed.connect(self._on_sync_frame_changed)
+
+        # Store reference in app_state for compatibility with other widgets
+        self.app_state.sync_manager = self.sync_manager
 
 
-        # if self.app_state.audio_folder:
-        #     # Optional 
-        #     audio_file = (
-        #         self.app_state.ds[self.app_state.mics_sel]
-        #         .sel(trials=self.app_state.trials_sel)
-        #         .values.item()
-        #     )
-
-        #     audio_path = os.path.join(self.app_state.audio_folder, audio_file)
-        #     self.app_state.audio_path = os.path.normpath(audio_path)
-
-
-
-        # # Timeline display with number of frames
-        # cap = cv2.VideoCapture(self.app_state.video_path)
-        # self.app_state.num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        # cap.release()
-        # self.navigation_widget.time_slider.setMinimum(0)
-        # self.navigation_widget.time_slider.setMaximum(self.app_state.num_frames - 1)
-        # self.navigation_widget.slider_clicks_enabled = True
- 
- 
-        # self.app_state.stream = VideoAudioStreamViewer(
-        #     viewer=self.viewer,
-        #     app_state=self.app_state,
-        #     video_source=self.app_state.video_path,
-        #     audio_source=self.app_state.audio_path,
-        #     enable_audio=True if self.app_state.audio_path else False,
-        # )
-        
-        # self.app_state.stream.start() # so user sees that video loaded
-        # self.app_state.stream.pause()
-
-
+    def _on_sync_frame_changed(self, frame_number: int):
+        """Handle frame changes from sync manager."""
+        self.app_state.current_frame = frame_number
+        current_time = frame_number / self.app_state.ds.fps
+        self.lineplot.time_marker.setValue(current_time)
+        self.lineplot._update_window_position()
 
 
     def _update_tracking(self):
@@ -601,17 +615,17 @@ class DataWidget(DataLoader, QWidget):
         
         
 
-    def toggle_play_pause(self):
-        """Toggle play/pause state of the video/audio stream."""
-        if not self.app_state.stream:
-            return
+    # def toggle_play_pause(self):
+    #     """Toggle play/pause state of the video/audio stream."""
+    #     if not self.app_state.stream:
+    #         return
         
-        if self.app_state.stream.is_paused:
-            self.navigation_widget.sync_toggle_btn.setCurrentIndex(0) # "video_to_lineplot"
-            self.app_state.stream.resume()
-        else:
-            self.navigation_widget.sync_toggle_btn.setCurrentIndex(1) # "lineplot_to_video"
-            self.app_state.stream.pause()
+    #     if self.app_state.stream.is_paused:
+    #         self.navigation_widget.sync_toggle_btn.setCurrentIndex(0) # "video_to_lineplot"
+    #         self.app_state.stream.resume()
+    #     else:
+    #         self.navigation_widget.sync_toggle_btn.setCurrentIndex(1) # "lineplot_to_video"
+    #         self.app_state.stream.pause()
 
 
 
