@@ -39,7 +39,7 @@ class NavigationWidget(QWidget):
         self.sync_toggle_btn.addItems(
             [
                 "Sync: Napari-Video → LinePlot (Follow Video)",
-                "Sync: LinePlot → Napari-Video (Interactive Plot)" "Sync: Napari-PyavStream → LinePlot (Follow Video)",
+                "Sync: LinePlot → Napari-Video (Interactive Plot)Sync: Napari-PyavStream → LinePlot (Follow Video)",
             ]
         )
         self.sync_toggle_btn.currentIndexChanged.connect(self.toggle_sync)

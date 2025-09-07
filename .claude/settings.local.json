@@ -13,7 +13,10 @@
       "Bash(dir:*)",
       "Read(C:\\Users\\Admin\\Documents\\Akseli\\Code\\MovFormer\\movformer/**)",
       "Read(/C:\\Users\\Admin\\Documents\\Akseli\\Code\\movformer-gui/**)",
-      "Bash(if not exist .vscode mkdir .vscode)"
+      "Bash(if not exist .vscode mkdir .vscode)",
+      "Bash(git config:*)",
+      "Bash(if exist .githookspre-commit del .githookspre-commit)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []
