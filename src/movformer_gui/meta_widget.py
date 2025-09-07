@@ -5,23 +5,17 @@ from pathlib import Path
 from napari.layers import Image
 from napari.viewer import Viewer
 from qt_niu.collapsible_widget import CollapsibleWidgetContainer
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QSlider
-
-from movformer_gui.napari_video_sync import NapariVideoPlayer
+from qtpy.QtWidgets import QApplication, QSizePolicy
 
 from .app_state import ObservableAppState
 from .data_widget import DataWidget
-from .labels_widget import LabelsWidget
 from .integrated_lineplot import IntegratedLinePlot
+from .labels_widget import LabelsWidget
+from .napari_video_sync import NapariVideoPlayer
 from .navigation_widget import NavigationWidget
 from .plot_widgets import PlotsWidget
-
-
 from .shortcuts_dialog import ShortcutsWidget
-from qtpy.QtWidgets import QLabel, QHBoxLayout
 
-
-from .integrated_lineplot import IntegratedLinePlot
 
 class MetaWidget(CollapsibleWidgetContainer):
 
@@ -37,31 +31,39 @@ class MetaWidget(CollapsibleWidgetContainer):
         print(f"Settings saved in {yaml_path}")
 
         self.app_state = ObservableAppState(yaml_path=str(yaml_path))
-        
+
         # Try to load previous settings
         self.app_state.load_from_yaml()
 
         # Initialize all widgets with app_state
         self._create_widgets()
 
-
         self.collapsible_widgets[1].expand()
 
-
         self._bind_global_shortcuts(self.labels_widget, self.data_widget)
-
 
     def _create_widgets(self):
         """Create all widgets with app_state passed to each one."""
 
-
-
-        # LinePlot widget docked at the bottom
+        # LinePlot widget docked at the bottom with 1/3 height from bottom
         self.lineplot = IntegratedLinePlot(self.viewer, self.app_state)
+
+        # Set size policy to allow vertical expansion but with preferred minimum
+        self.lineplot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Set minimum height to roughly 1/3 of typical screen height
+        try:
+            screen = QApplication.primaryScreen()
+            if screen is not None:
+                screen_height = screen.availableGeometry().height()
+            else:
+                screen_height = 1080  # fallback default
+        except (AttributeError, RuntimeError):
+            screen_height = 1080  # fallback default
+        lineplot_height = int(screen_height * 0.33)
+        self.lineplot.setMinimumHeight(lineplot_height)
+
         self.viewer.window.add_dock_widget(self.lineplot, area="bottom")
-
-
-
 
         # Create all widgets with app_state
         self.plots_widget = PlotsWidget(self.viewer, self.app_state)
@@ -70,31 +72,37 @@ class MetaWidget(CollapsibleWidgetContainer):
         self.navigation_widget = NavigationWidget(self.viewer, self.app_state)
         self.sync_manager = NapariVideoPlayer(self.viewer, self.app_state, None)
         self.data_widget = DataWidget(self.viewer, self.app_state, self)
-        
 
         # Set navigation_widget reference in app_state for property callback
         self.app_state.lineplot = self.lineplot
         self.app_state.sync_manager = self.sync_manager
 
-
-
-                
-
         # Set up cross-references between widgets, so they can talk to each other
 
-            
         # Needs data widget for updating plots after navigation
         self.navigation_widget.set_data_widget(self.data_widget)
-        
 
         # Labels and plot widgets need lineplot read info (e.g. xClicked) and apply plotting
         self.labels_widget.set_lineplot(self.lineplot)
         self.plots_widget.set_lineplot(self.lineplot)
-        
-        
+
         # The one widget to rule them all (loading data, updating plots, managing sync)
         self.data_widget.set_references(self.lineplot, self.labels_widget, self.plots_widget, self.navigation_widget)
-        
+
+        # Set maximum height constraints for widgets to respect lineplot 1/3 rule
+        remaining_height = int(screen_height * 0.67)  # 2/3 of screen for other widgets
+        max_widget_height = int(remaining_height / 5)  # Divide among 5 widgets roughly
+
+        # Configure size policies and max heights for all widgets
+        for widget in [
+            self.shortcuts_widget,
+            self.data_widget,
+            self.labels_widget,
+            self.plots_widget,
+            self.navigation_widget,
+        ]:
+            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            widget.setMaximumHeight(max_widget_height)
 
         # Add widgets to collapsible container
         self.add_widget(
@@ -102,9 +110,7 @@ class MetaWidget(CollapsibleWidgetContainer):
             collapsible=True,
             widget_title="Shortcuts and Help",  # Add explain images and helpful GitHub links
         )
-        
-        
-        
+
         self.add_widget(
             self.data_widget,
             collapsible=True,
@@ -123,8 +129,6 @@ class MetaWidget(CollapsibleWidgetContainer):
             widget_title="Plotting controls",
         )
 
-
-        
         self.add_widget(
             self.navigation_widget,
             collapsible=True,
@@ -151,10 +155,11 @@ class MetaWidget(CollapsibleWidgetContainer):
     def _override_napari_shortcuts(self):
         """Aggressively unbind napari shortcuts at all levels."""
         keys_to_override = [str(i) for i in range(10)]
-        
-        from napari.layers import Image, Points, Shapes, Labels, Tracks, Surface
+
+        from napari.layers import Labels, Points, Shapes, Surface, Tracks
+
         layer_types = [Image, Points, Shapes, Labels, Tracks, Surface]
-        
+
         for layer_type in layer_types:
             for key in keys_to_override:
                 try:
@@ -164,25 +169,23 @@ class MetaWidget(CollapsibleWidgetContainer):
 
         for key in keys_to_override:
             try:
-    
-                if hasattr(self.viewer, 'keymap') and key in self.viewer.keymap:
+
+                if hasattr(self.viewer, "keymap") and key in self.viewer.keymap:
                     del self.viewer.keymap[key]
-                
-                if hasattr(self.viewer, '_keymap') and key in self.viewer._keymap:
-                    del self.viewer._keymap[key] 
+
+                if hasattr(self.viewer, "_keymap") and key in self.viewer._keymap:
+                    del self.viewer._keymap[key]
             except Exception as e:
                 print(f"Could not remove {key} from viewer keymap: {e}")
-                
-                
-    
+
     def _bind_global_shortcuts(self, labels_widget, data_widget):
         """Bind all global shortcuts using napari's @viewer.bind_key syntax."""
 
-
         # Manually unbind previous keys.
         self._override_napari_shortcuts()
-   
 
+        # TO ADD documentation for inbuild pyqgt graph shortcuts
+        # Right click hold - pull left/right to adjust xlim, up/down to adjust ylim
 
         # # Pause/play video/audio
         # @viewer.bind_key("space", overwrite=True)
@@ -231,7 +234,6 @@ class MetaWidget(CollapsibleWidgetContainer):
         def adjust_window_larger(v):
             self.plots_widget._adjust_window_size(1.2)  # Make window 20% larger
 
-
         # Motif labeling (0-9, q, w, r, t)
         for key, motif_key in zip(
             [
@@ -277,4 +279,3 @@ class MetaWidget(CollapsibleWidgetContainer):
         @viewer.bind_key("d", overwrite=True)
         def delete_motif(v):
             labels_widget._delete_motif()
-

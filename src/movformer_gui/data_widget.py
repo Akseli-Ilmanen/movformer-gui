@@ -1,40 +1,35 @@
 """Widget for selecting start/stop times and playing a segment in napari."""
+
 import os
+from pathlib import Path
+
 import numpy as np
-import imageio.v3 as iio
-import cv2
+from movement.napari.loader_widgets import DataLoader
 from napari.utils.notifications import show_error
 from napari.viewer import Viewer
-import napari
 from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QWidget,
-    QApplication,
-    QLabel,
-    QCheckBox,
-    QSlider,
 )
-from qtpy.QtCore import Qt
 
+from movformer.utils.xr_utils import sel_valid
+
+from .audio_cache import SharedAudioCache
 from .data_loader import load_dataset
 from .napari_video_sync import NapariVideoPlayer
-from .audio_cache import SharedAudioCache
-from movformer.utils.xr_utils import sel_valid
-import napari
-from movement.napari.loader_widgets import DataLoader
-from pathlib import Path
-from typing import Optional
+
 
 class DataWidget(DataLoader, QWidget):
-
-   
     """Widget to control which data is loaded, displayed and stored for next time."""
-    
+
     def __init__(
         self,
         napari_viewer: Viewer,
@@ -49,7 +44,7 @@ class DataWidget(DataLoader, QWidget):
         self.setLayout(QFormLayout())
         self.app_state = app_state
         self.meta_widget = meta_widget
-        self.sync_manager: Optional[NapariVideoPlayer] = None
+        self.sync_manager: NapariVideoPlayer | None = None
         self.lineplot = None  # Will be set after creation
         self.labels_widget = None  # Will be set after creation
         self.plots_widget = None  # Will be set after creation
@@ -61,7 +56,6 @@ class DataWidget(DataLoader, QWidget):
         self.combos = {}
         # Dictionary to store all controls for enabling/disabling
         self.controls = []
-        
 
         # Tracking stuff
         self.fps = None
@@ -69,19 +63,16 @@ class DataWidget(DataLoader, QWidget):
         self.file_path = None
         self.file_name = None
 
-
-
         self.app_state.audio_video_sync = None
         # E.g. {keypoints = ["beakTip, StickTip"], trials=[1, 2, 3, 4], ...}
-        self.type_vars_dict = {} # Gets filled by load_dataset
-
+        self.type_vars_dict = {}  # Gets filled by load_dataset
 
         self._create_path_folder_widgets()
         self._create_load_button()
 
-        # Restore UI text fields from app state
-        if self.app_state.file_path:
-            self.file_path_edit.setText(self.app_state.file_path)
+        # Restore UI text fields from app statev
+        if self.app_state.nc_file_path:
+            self.nc_file_path_edit.setText(self.app_state.nc_file_path)
         if self.app_state.video_folder:
             self.video_folder_edit.setText(self.app_state.video_folder)
         if self.app_state.audio_folder:
@@ -89,17 +80,12 @@ class DataWidget(DataLoader, QWidget):
         if self.app_state.tracking_folder:
             self.tracking_folder_edit.setText(self.app_state.tracking_folder)
 
-
-
     def set_references(self, lineplot, labels_widget, plots_widget, navigation_widget):
         """Set references to other widgets after creation."""
         self.lineplot = lineplot
         self.labels_widget = labels_widget
         self.plots_widget = plots_widget
         self.navigation_widget = navigation_widget
-        
-
-
 
     def _create_path_widget(self, label: str, object_name: str, browse_callback):
         """Generalized function to create a line edit and browse button for file/folder paths."""
@@ -108,20 +94,37 @@ class DataWidget(DataLoader, QWidget):
         browse_button = QPushButton("Browse")
         browse_button.setObjectName(f"{object_name}_browse_button")
         browse_button.clicked.connect(browse_callback)
-        
+
+        clear_button = QPushButton("Clear")
+        clear_button.setObjectName(f"{object_name}_clear_button")
+        clear_button.clicked.connect(lambda: self._on_clear_path_clicked(object_name, line_edit))
 
         layout = QHBoxLayout()
         layout.addWidget(line_edit)
         layout.addWidget(browse_button)
+        layout.addWidget(clear_button)
         self.layout().addRow(label, layout)
 
         return line_edit
 
+    def _on_clear_path_clicked(self, object_name: str, line_edit: QLineEdit):
+        """Clear the path field and corresponding app state value."""
+        line_edit.setText("")
+
+        if object_name == "nc_file_path":
+            self.app_state.nc_file_path = None
+        elif object_name == "video_folder":
+            self.app_state.video_folder = None
+        elif object_name == "audio_folder":
+            self.app_state.audio_folder = None
+        elif object_name == "tracking_folder":
+            self.app_state.tracking_folder = None
+
     def _create_path_folder_widgets(self):
         """Create file path, video folder, and audio folder selectors."""
-        self.file_path_edit = self._create_path_widget(
+        self.nc_file_path_edit = self._create_path_widget(
             label="File path:",
-            object_name="file_path",
+            object_name="nc_file_path",
             browse_callback=lambda: self.on_browse_clicked("file"),
         )
         self.video_folder_edit = self._create_path_widget(
@@ -139,23 +142,6 @@ class DataWidget(DataLoader, QWidget):
             object_name="tracking_folder",
             browse_callback=lambda: self.on_browse_clicked("folder", "tracking"),
         )
-            
-
-        # Removing audio makes GUI faster.
-        self.clear_audio_checkbox = QCheckBox("Clear audio")
-        self.clear_audio_checkbox.setObjectName("clear_audio_checkbox")
-        self.clear_audio_checkbox.stateChanged.connect(self._on_clear_audio_checked)
-        self.layout().addRow(self.clear_audio_checkbox)
-
- 
-
-
-    def _on_clear_audio_checked(self, state: int) -> None:
-        if state == Qt.Checked:
-            self.audio_folder_edit.setText('')
-            self.app_state.audio_folder = None
-            self.clear_audio_checkbox.setChecked(True)
-
 
     def _create_load_button(self):
         """Create a button to load the file to the viewer."""
@@ -163,10 +149,6 @@ class DataWidget(DataLoader, QWidget):
         self.load_button.setObjectName("load_button")
         self.load_button.clicked.connect(lambda: self.on_load_clicked())
         self.layout().addRow(self.load_button)
-        
-    
-
-
 
     def on_browse_clicked(self, browse_type: str = "file", media_type: str | None = None):
         """
@@ -182,23 +164,22 @@ class DataWidget(DataLoader, QWidget):
                 caption="Open file containing feature data",
                 filter="NetCDF files (*.nc)",
             )
-            file_path = result[0] if result and len(result) >= 1 else ""
-            if not file_path:
+            nc_file_path = result[0] if result and len(result) >= 1 else ""
+            if not nc_file_path:
                 return
 
-            self.file_path_edit.setText(file_path)
-            self.app_state.file_path = file_path
+            self.nc_file_path_edit.setText(nc_file_path)
+            self.app_state.nc_file_path = nc_file_path
 
         elif browse_type == "folder":
             if media_type == "video":
-                caption = f"Open folder with video files (e.g. mp4, mov)."
+                caption = "Open folder with video files (e.g. mp4, mov)."
             elif media_type == "audio":
-                caption = f"Open folder with audio files (e.g. wav, mp3, mp4)."
+                caption = "Open folder with audio files (e.g. wav, mp3, mp4)."
             elif media_type == "tracking":
-                caption = f"Open folder with tracking files (e.g. .csv, .h5)."
+                caption = "Open folder with tracking files (e.g. .csv, .h5)."
 
             folder_path = QFileDialog.getExistingDirectory(None, caption=caption)
-
 
             if media_type == "video":
                 self.video_folder_edit.setText(folder_path)
@@ -211,28 +192,21 @@ class DataWidget(DataLoader, QWidget):
                 self.tracking_folder_edit.setText(folder_path)
                 self.app_state.tracking_folder = folder_path
 
-
-
     def on_load_clicked(self):
         """Load the file and show line plot in napari dock."""
         self.setVisible(False)
 
         # Load ds
-        file_path = self.file_path_edit.text()        
-        self.app_state.ds, self.type_vars_dict = load_dataset(file_path)
+        nc_file_path = self.nc_file_path_edit.text()
+        self.app_state.ds, self.type_vars_dict = load_dataset(nc_file_path)
         self.app_state.trials = list(self.app_state.ds.trials.values)
         self.navigation_widget.trials_combo.addItems([str(int(trial)) for trial in self.app_state.trials])
 
         self._create_trial_controls()
-        
-
 
         self._restore_or_set_defaults()
 
-
-
         self._set_controls_enabled(True)
-
 
         self._update_plot()
         self._update_video_audio()
@@ -244,12 +218,8 @@ class DataWidget(DataLoader, QWidget):
 
         self.app_state.current_frame = 0
 
-
         self.setVisible(True)
         self._remove_ugly()
-
-
-
 
     def _remove_ugly(self):
         """Function to execute after on_load_clicked has been called."""
@@ -259,13 +229,11 @@ class DataWidget(DataLoader, QWidget):
         self.meta_widget.collapsible_widgets[1].expand()
         QApplication.processEvents()
 
-  
-
     def _create_trial_controls(self):
         """Create all trial-related controls based on info configuration."""
-        
+
         # Create widgets in the desired order: cameras, fps_playback, mics, audio player, then gap
-        
+
         # 1. Cameras first
         if "cameras" in self.type_vars_dict.keys():
             self._create_combo_widget("cameras", self.type_vars_dict["cameras"])
@@ -285,8 +253,6 @@ class DataWidget(DataLoader, QWidget):
         self.controls.append(self.fps_playback_edit)
         if "mics" in self.type_vars_dict.keys():
             self._create_combo_widget("mics", self.type_vars_dict["mics"])
-        
-
 
         else:
             combo = QComboBox()
@@ -296,11 +262,8 @@ class DataWidget(DataLoader, QWidget):
             self.layout().addRow("Mics:", combo)
             self.audio_player = None
 
-
         if "tracking" in self.type_vars_dict.keys():
             self._create_combo_widget("tracking", self.type_vars_dict["tracking"])
-
-
 
         # Add spectrogram checkbox
         self.plot_spec_checkbox = QCheckBox("Plot spectrogram")
@@ -314,7 +277,6 @@ class DataWidget(DataLoader, QWidget):
         gap_label.setFixedHeight(10)  # Create visual gap
         self.layout().addRow(gap_label)
 
-
         # 6. Now add remaining controls
         remaining_type_vars = ["individuals", "keypoints", "features", "colors", "trial_conditions"]
         for type_var in remaining_type_vars:
@@ -327,11 +289,8 @@ class DataWidget(DataLoader, QWidget):
                 combo.addItems(["None"])
                 self.layout().addRow(f"{type_var.capitalize()}:", combo)
 
-
         # Initially disable trial controls until data is loaded
         self._set_controls_enabled(False)
-        
-
 
     def _set_controls_enabled(self, enabled: bool):
         """Enable or disable all trial-related controls."""
@@ -339,46 +298,43 @@ class DataWidget(DataLoader, QWidget):
             control.setEnabled(enabled)
         self.app_state.ready = enabled
 
-
     def _create_combo_widget(self, key, vars):
         """Create a combo box widget for a given info key."""
-        
+
         combo = QComboBox()
         combo.setObjectName(f"{key}_combo")
         combo.currentTextChanged.connect(self._on_combo_changed)
-        if key in ['colors', 'trial_conditions']:
+        if key in ["colors", "trial_conditions"]:
             colour_variables = ["None"] + [str(var) for var in vars]
             combo.addItems(colour_variables)
         else:
             combo.addItems([str(var) for var in vars])
 
         self.layout().addRow(f"{key.capitalize()}:", combo)
-        
+
         self.combos[key] = combo
         self.controls.append(combo)
 
         if key == "trial_conditions":
-                self.trial_conditions_value_combo = QComboBox()
-                self.trial_conditions_value_combo.setObjectName("trial_condition_value_combo")
-                self.trial_conditions_value_combo.addItem("None")
-                self.trial_conditions_value_combo.currentTextChanged.connect(self._on_trial_condition_values_changed)
-                self.layout().addRow("Filter by condition:", self.trial_conditions_value_combo)
-                self.controls.append(self.trial_conditions_value_combo)
+            self.trial_conditions_value_combo = QComboBox()
+            self.trial_conditions_value_combo.setObjectName("trial_condition_value_combo")
+            self.trial_conditions_value_combo.addItem("None")
+            self.trial_conditions_value_combo.currentTextChanged.connect(self._on_trial_condition_values_changed)
+            self.layout().addRow("Filter by condition:", self.trial_conditions_value_combo)
+            self.controls.append(self.trial_conditions_value_combo)
         return combo
 
-    
     def _on_combo_changed(self):
         if not self.app_state.ready:
             return
 
-        # Figure out which key this belongs to. E.g. if value 
+        # Figure out which key this belongs to. E.g. if value
         combo = self.sender()
         for key, value in self.combos.items():
             if value is combo:
                 break
-        
-        self.app_state.set_key_sel(key, combo.currentText())
 
+        self.app_state.set_key_sel(key, combo.currentText())
 
         if key in ["cameras", "mics"]:
             self._update_video_audio()
@@ -388,13 +344,9 @@ class DataWidget(DataLoader, QWidget):
             self._update_plot()
         elif key == "trial_conditions":
             self._update_trial_condition_values()
-    
-        
 
     def _restore_or_set_defaults(self):
         """Restore saved selections from app_state or set defaults from available options."""
-        
-        
 
         for key, vars in self.type_vars_dict.items():
             combo = self.combos.get(key)
@@ -411,16 +363,14 @@ class DataWidget(DataLoader, QWidget):
                     combo.setCurrentText(str(vars[0]))
                     self.app_state.set_key_sel(key, str(vars[0]))
 
-
         if self.app_state.key_sel_exists("trials"):
             self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.get_key_sel("trials")))
             self.app_state.trials_sel = int(self.app_state.get_key_sel("trials"))
         else:
             # Default to first value
             self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials[0]))
-            self.app_state.trials_sel =  int(self.app_state.trials[0])
+            self.app_state.trials_sel = int(self.app_state.trials[0])
 
-    
     def _on_fps_changed(self):
         """Handle playback FPS change from UI."""
         fps_playback = float(self.fps_playback_edit.text())
@@ -431,7 +381,6 @@ class DataWidget(DataLoader, QWidget):
         slider_widget = qt_dims.slider_widgets[0]
         slider_widget._update_play_settings(fps=fps_playback, loop_mode="once", frame_range=None)
 
-
     def _update_trial_condition_values(self):
         """Update the trial condition value dropdown based on selected key."""
         filter_condition = self.app_state.trial_conditions_sel
@@ -440,21 +389,16 @@ class DataWidget(DataLoader, QWidget):
             self.trial_conditions_value_combo.setCurrentText("None")
             return
 
-
         self.trial_conditions_value_combo.blockSignals(True)
         self.trial_conditions_value_combo.clear()
-
 
         if filter_condition in self.app_state.ds.coords:
             # Get unique values for the selected condition key
             unique_values = np.unique(self.app_state.ds.coords[filter_condition].values)
 
-            self.trial_conditions_value_combo.addItems(
-              ["None"] + [str(int(val)) for val in np.sort(unique_values)]
-            )
+            self.trial_conditions_value_combo.addItems(["None"] + [str(int(val)) for val in np.sort(unique_values)])
 
         self.trial_conditions_value_combo.blockSignals(False)
-     
 
     def _on_trial_condition_values_changed(self):
         """Update the available trials based on condition filtering."""
@@ -483,10 +427,8 @@ class DataWidget(DataLoader, QWidget):
                 self.app_state.trials_sel = int(self.app_state.trials[0])
                 self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials_sel))
 
-
         self.navigation_widget.trials_combo.blockSignals(False)
         self._update_plot()
-
 
     def _update_plot(self):
         """Update the line plot with current trial/keypoint/variable selection."""
@@ -503,22 +445,15 @@ class DataWidget(DataLoader, QWidget):
 
             labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
-
             self.labels_widget.plot_all_motifs(time_data, labels)
 
         except (KeyError, AttributeError, ValueError) as e:
             show_error(f"Error updating plot: {e}")
 
-
-
-
-
     def _update_video_audio(self):
         """Update video and audio using napari video plugin and new sync manager."""
         if not self.app_state.ready or not self.app_state.video_folder:
             return
-
- 
 
         # Remove all previous video layers
         for layer in list(self.viewer.layers):
@@ -531,11 +466,7 @@ class DataWidget(DataLoader, QWidget):
             self.sync_manager = None
 
         # Get video file path from dataset
-        video_file = (
-            self.app_state.ds[self.app_state.cameras_sel]
-            .sel(trials=self.app_state.trials_sel)
-            .values.item()
-        )
+        video_file = self.app_state.ds[self.app_state.cameras_sel].sel(trials=self.app_state.trials_sel).values.item()
 
         video_path = os.path.join(self.app_state.video_folder, video_file)
         self.app_state.video_path = os.path.normpath(video_path)
@@ -547,12 +478,10 @@ class DataWidget(DataLoader, QWidget):
         self.viewer.layers.move(video_index, 0)  # Move to bottom layer
 
         # Set up audio path if available
-        if self.app_state.audio_folder and hasattr(self.app_state, 'mics_sel'):
+        if self.app_state.audio_folder and hasattr(self.app_state, "mics_sel"):
             try:
                 audio_file = (
-                    self.app_state.ds[self.app_state.mics_sel]
-                    .sel(trials=self.app_state.trials_sel)
-                    .values.item()
+                    self.app_state.ds[self.app_state.mics_sel].sel(trials=self.app_state.trials_sel).values.item()
                 )
                 audio_path = os.path.join(self.app_state.audio_folder, audio_file)
                 self.app_state.audio_path = os.path.normpath(audio_path)
@@ -564,7 +493,7 @@ class DataWidget(DataLoader, QWidget):
             viewer=self.viewer,
             app_state=self.app_state,
             video_path=self.app_state.video_path,
-            audio_path=self.app_state.audio_path
+            audio_path=self.app_state.audio_path,
         )
 
         # Connect sync manager frame changes to app state
@@ -573,7 +502,6 @@ class DataWidget(DataLoader, QWidget):
         # Store reference in app_state for compatibility with other widgets
         self.app_state.sync_manager = self.sync_manager
 
-
     def _on_sync_frame_changed(self, frame_number: int):
         """Handle frame changes from sync manager."""
         self.app_state.current_frame = frame_number
@@ -581,26 +509,26 @@ class DataWidget(DataLoader, QWidget):
         self.lineplot.time_marker.setValue(current_time)
         self.lineplot._update_window_position()
 
-
     def _update_tracking(self):
         if not self.app_state.tracking_folder:
             return
 
         # Remove all previous layers with name "video"
         for layer in list(self.viewer.layers):
-            if self.file_name and layer.name in [f"tracks: {self.file_name}", f"points: {self.file_name}", f"boxes: {self.file_name}"]:
+            if self.file_name and layer.name in [
+                f"tracks: {self.file_name}",
+                f"points: {self.file_name}",
+                f"boxes: {self.file_name}",
+            ]:
                 self.viewer.layers.remove(layer)
-                
-        
+
         self.fps = self.app_state.ds.fps
         self.source_software = self.app_state.ds.source_software
-        
+
         tracking_file = (
-            self.app_state.ds[self.app_state.tracking_sel]
-            .sel(trials=self.app_state.trials_sel)
-            .values.item()
-        )   
-        
+            self.app_state.ds[self.app_state.tracking_sel].sel(trials=self.app_state.trials_sel).values.item()
+        )
+
         self.file_path = os.path.join(self.app_state.tracking_folder, tracking_file)
         self.file_name = Path(self.file_path).name
 
@@ -612,14 +540,12 @@ class DataWidget(DataLoader, QWidget):
         if self.data_bboxes is not None:
             self._add_boxes_layer()
         self._set_initial_state()
-        
-        
 
     # def toggle_play_pause(self):
     #     """Toggle play/pause state of the video/audio stream."""
     #     if not self.app_state.stream:
     #         return
-        
+
     #     if self.app_state.stream.is_paused:
     #         self.navigation_widget.sync_toggle_btn.setCurrentIndex(0) # "video_to_lineplot"
     #         self.app_state.stream.resume()
@@ -627,29 +553,18 @@ class DataWidget(DataLoader, QWidget):
     #         self.navigation_widget.sync_toggle_btn.setCurrentIndex(1) # "lineplot_to_video"
     #         self.app_state.stream.pause()
 
-
-
     def closeEvent(self, event):
         """Clean up video stream and data cache."""
 
-
         SharedAudioCache.clear_cache()
-        
-        if hasattr(self.app_state, 'stream') and self.app_state.stream:
+
+        if hasattr(self.app_state, "stream") and self.app_state.stream:
             self.app_state.stream.stop()
 
         super().closeEvent(event)
 
-
-
-
     def _on_plot_spec_checkbox_changed(self):
         """Handle spectrogram checkbox state change."""
         self.app_state.plot_spectrogram = bool(self.plot_spec_checkbox.isChecked())
-        
-            
+
         self._update_plot()
-
-
-
-      

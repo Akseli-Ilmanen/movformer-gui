@@ -1,26 +1,16 @@
-import sys
-import os
-sys.path.append(r'C:\Users\Admin\Documents\Akseli\Code\MovFormer\movformer')
-
-try:
-    from ._version import version as __version__
-except ImportError:
-    __version__ = "unknown"
-
-from .meta_widget import MetaWidget
-from .data_widget import DataWidget
-from .labels_widget import LabelsWidget
-
-# Import commonly used MovFormer modules
-from movformer.utils import *
 from movformer.features import *
 from movformer.plots import *
 
+# Import commonly used MovFormer modules
+from movformer.utils import *
 
+from .data_widget import DataWidget
+from .labels_widget import LabelsWidget
+from .meta_widget import MetaWidget
 
 __all__ = (
     "MetaWidget",
-    "DataWidget", 
+    "DataWidget",
     "LabelsWidget",
     "LinePlotWidget",
 )
