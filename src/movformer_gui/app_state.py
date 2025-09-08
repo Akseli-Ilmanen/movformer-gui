@@ -1,8 +1,8 @@
 """Refactored observable application state with napari video sync support."""
 
-import contextlib
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
 import xarray as xr
 import yaml
 from napari.settings import get_settings
@@ -16,13 +16,13 @@ class AppStateSpec:
         if key in cls.VARS:
             return cls.VARS[key][1]
         raise KeyError(f"No default for key: {key}")
-    
+
     # Variable name: (type, default, save_to_yaml, signal_type)
     VARS = {
         "ds": (xr.Dataset | None, None, False, object),
         "fps_playback": (float, 30.0, True, float),
         "trials": (list[int], [], False, object),
-        "file_path": (str | None, None, True, str),
+        "nc_file_path": (str | None, None, True, str),
         "video_folder": (str | None, None, True, str),
         "audio_folder": (str | None, None, True, str),
         "tracking_folder": (str | None, None, True, str),
@@ -66,20 +66,20 @@ class AppState:
 
 class ObservableAppState(QObject):
     """State container with change notifications and computed properties."""
-    
+
     # Signals for state changes
     for var, (_, _, _, signal_type) in AppStateSpec.VARS.items():
         locals()[f"{var}_changed"] = Signal(signal_type)
-    
+
     data_updated = Signal()
     current_time_changed = Signal(float)  # Special signal for computed property
     sync_state_changed = Signal(str)  # Signal for sync mode changes
-    
+
     def __init__(self, yaml_path: str | None = None, auto_save_interval: int = 30000):
         super().__init__()
         object.__setattr__(self, "_state", AppState())
         object.__setattr__(self, "_fps_cache", None)  # Cache for FPS value
-        
+
         self.settings = get_settings()
         self._yaml_path = yaml_path or "gui_settings.yaml"
         self._auto_save_timer = QTimer()
@@ -90,75 +90,80 @@ class ObservableAppState(QObject):
         # Reference to sync manager (replaces old stream)
         self.sync_manager = None
 
-    def _get_fps(self) -> Optional[float]:
+    def _get_fps(self) -> float | None:
         """Get FPS from dataset, with caching."""
-        if hasattr(self._state, 'ds') and self._state.ds is not None:
-            if hasattr(self._state.ds, 'fps'):
+        if hasattr(self._state, "ds") and self._state.ds is not None:
+            if hasattr(self._state.ds, "fps"):
                 self._fps_cache = float(self._state.ds.fps)
                 return self._fps_cache
         return self._fps_cache  # Return cached value if DS not available
-    
+
     def get_with_default(self, key):
         """Return value from app state, or default from AppStateSpec if None."""
         value = getattr(self, key, None)
         if value is None:
             value = AppStateSpec.get_default(key)
         return value
-    
+
     def __getattr__(self, name):
         if name in AppStateSpec.VARS:
             return getattr(self._state, name)
         raise AttributeError(name)
-    
+
     def __setattr__(self, name, value):
         # Handle special attributes that don't go through state
-        if name in ("_state", "_fps_cache", "settings", 
-                   "_yaml_path", "_auto_save_timer", "navigation_widget", 
-                   "lineplot", "sync_manager"):
+        if name in (
+            "_state",
+            "_fps_cache",
+            "settings",
+            "_yaml_path",
+            "_auto_save_timer",
+            "navigation_widget",
+            "lineplot",
+            "sync_manager",
+        ):
             super().__setattr__(name, value)
             return
-        
+
         # Handle state variables
         if name in AppStateSpec.VARS:
             old_value = getattr(self._state, name, None)
             setattr(self._state, name, value)
-            
+
             # Emit signal if value changed
             signal = getattr(self, f"{name}_changed", None)
             if signal and old_value != value:
                 signal.emit(value)
-        
-                    
+
             if name == "ds":
                 # Clear FPS cache when dataset changes
                 self._fps_cache = None
-                
+
             elif name == "sync_state":
                 # Update lineplot mode when sync state changes
                 if self.lineplot is not None:
                     self.lineplot.set_sync_mode(value)
-                
+
                 # Emit special sync state signal
                 if old_value != value:
                     self.sync_state_changed.emit(value)
-            
 
             return
-        
+
         # Handle other attributes
         super().__setattr__(name, value)
-    
+
     # --- Dynamic _sel variables ---
     def get_ds_kwargs(self):
-        ds_kwargs = {"trials": getattr(self, "trials_sel")}
+        ds_kwargs = {"trials": self.trials_sel}
         ds_kwargs["trials"] = int(ds_kwargs["trials"])
-        
+
         if hasattr(self, "keypoints_sel"):
             ds_kwargs["keypoints"] = self.keypoints_sel
         if hasattr(self, "individuals_sel"):
             ds_kwargs["individuals"] = self.individuals_sel
         return ds_kwargs
-    
+
     def key_sel_exists(self, type_key: str) -> bool:
         """Check if a key selection exists for a given type."""
         return hasattr(self, f"{type_key}_sel")
@@ -176,10 +181,10 @@ class ObservableAppState(QObject):
         attr_name = f"{type_key}_sel"
         old_value = getattr(self, attr_name, None)
         setattr(self, attr_name, currentValue)
-        
+
         if old_value != currentValue:
             self.data_updated.emit()
-    
+
     # --- Save/Load methods ---
     def get_saveable_state_dict(self) -> dict:
         state_dict = {}

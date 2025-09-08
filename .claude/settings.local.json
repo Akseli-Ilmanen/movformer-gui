@@ -17,7 +17,11 @@
       "mcp__filesystem-readonly__list_directory"
     ],
     "additionalDirectories": [
-      "C:\\Users\\Admin\\anaconda3\\envs"
+      "C:\\Users\\Admin\\anaconda3\\envs",
+      "Bash(if not exist .vscode mkdir .vscode)",
+      "Bash(git config:*)",
+      "Bash(if exist .githookspre-commit del .githookspre-commit)",
+      "Bash(rm:*)"
     ]
   }
 }

@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Notes
+
+Claude Code has permission to read make any necessary changes to files in this repository during development tasks.
+It has also permissions to read (but not edit!) the folders:
+C:\Users\Admin\Documents\Akseli\Code\MovFormer
+C:\Users\Admin\anaconda3\envs\movformer-gui
+
+
 ## Project Overview
 
 MovFormer-GUI is a napari plugin for labeling start/stop times of animal movements. It integrates with MovFormer, a workflow using action segmentation transformers to predict movement segments. The GUI loads NetCDF datasets containing behavioral features, displays synchronized video/audio, and allows interactive motif labeling.

@@ -1,16 +1,15 @@
 """Enhanced navigation widget with proper sync mode handling."""
 
-from qtpy.QtWidgets import (QHBoxLayout, QPushButton, QWidget, QComboBox, 
-                            QSlider, QLabel, QVBoxLayout)
-from qtpy.QtCore import Signal
 from napari import Viewer
+from qtpy.QtCore import Signal
+from qtpy.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class NavigationWidget(QWidget):
     """Widget for trial navigation and sync toggle between video and lineplot."""
-    
+
     sync_mode_changed = Signal(str)
-    
+
     def __init__(self, viewer: Viewer, app_state, parent=None):
         super().__init__(parent=parent)
         self.viewer = viewer
@@ -37,11 +36,12 @@ class NavigationWidget(QWidget):
         # Sync mode selector with clear labels
         self.sync_toggle_btn = QComboBox()
         self.sync_toggle_btn.setObjectName("sync_toggle_btn")
-        self.sync_toggle_btn.addItems([
-            "Sync: Napari-Video → LinePlot (Follow Video)", 
-            "Sync: LinePlot → Napari-Video (Interactive Plot)"
-            "Sync: Napari-PyavStream → LinePlot (Follow Video)",
-        ])
+        self.sync_toggle_btn.addItems(
+            [
+                "Sync: Napari-Video → LinePlot (Follow Video)",
+                "Sync: LinePlot → Napari-Video (Interactive Plot)Sync: Napari-PyavStream → LinePlot (Follow Video)",
+            ]
+        )
         self.sync_toggle_btn.currentIndexChanged.connect(self.toggle_sync)
 
         # Layout
@@ -62,7 +62,6 @@ class NavigationWidget(QWidget):
         main_layout.addLayout(row3)
         self.setLayout(main_layout)
 
-
         # Initialize sync state from app_state
         sync_state = getattr(self.app_state, "sync_state", None)
         if sync_state == "video_to_lineplot":
@@ -80,16 +79,15 @@ class NavigationWidget(QWidget):
     def set_data_widget(self, data_widget):
         """Set reference to data widget."""
         self.data_widget = data_widget
-    
+
     def set_lineplot(self, lineplot):
         """Set reference to lineplot widget."""
         self.lineplot = lineplot
-    
-     
+
     def toggle_sync(self) -> None:
         """Toggle between sync modes."""
         current_index = self.sync_toggle_btn.currentIndex()
-        
+
         if current_index == 0:
             new_mode = "video_to_lineplot"
         elif current_index == 1:
@@ -102,7 +100,7 @@ class NavigationWidget(QWidget):
         
         # Emit signal for other components
         self.sync_mode_changed.emit(new_mode)
-        
+
         # Update lineplot mode if available
         if self.lineplot and self.app_state.ready:
             self.lineplot.set_sync_mode(new_mode)
@@ -116,6 +114,7 @@ class NavigationWidget(QWidget):
     def _trial_change_consequences(self):
         """Handle consequences of trial changes."""
         if self.data_widget:
+            self.data_widget._update_tracking()
             self.data_widget._update_video_audio()
             self.data_widget._update_plot()
 
@@ -125,16 +124,16 @@ class NavigationWidget(QWidget):
             return
 
         current_text = self.trials_combo.currentText()
-        if not current_text or current_text.strip() == '':
+        if not current_text or current_text.strip() == "":
             return
-            
+
         try:
             trial_value = int(current_text)
             self.app_state.set_key_sel("trials", trial_value)
             self._trial_change_consequences()
-            
+
             # Reset time to 0 on trial change
-            if hasattr(self.app_state, 'current_time'):
+            if hasattr(self.app_state, "current_time"):
                 self._update_slider_display()
         except ValueError:
             return
@@ -149,12 +148,12 @@ class NavigationWidget(QWidget):
 
     def _update_trial(self, direction: int):
         """Navigate to next/previous trial."""
-        if not hasattr(self.app_state, 'trials') or not self.app_state.trials:
+        if not hasattr(self.app_state, "trials") or not self.app_state.trials:
             return
-            
+
         curr_idx = self.app_state.trials.index(self.app_state.trials_sel)
         new_idx = curr_idx + direction
-        
+
         if 0 <= new_idx < len(self.app_state.trials):
             new_trial = self.app_state.trials[new_idx]
             self.app_state.trials_sel = new_trial

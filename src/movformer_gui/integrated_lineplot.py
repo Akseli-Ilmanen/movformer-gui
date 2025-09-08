@@ -64,7 +64,7 @@ class IntegratedLinePlot(QWidget):
     
     def _on_sync_mode_changed(self, sync_state: str) -> None:
         """Handle sync mode changes."""
-        if sync_state == "video_to_lineplot":
+        if sync_state in ["video_to_lineplot", "pyav_to_lineplot"]:
             self._set_video_sync_mode()
         else:
             self._set_interactive_mode()
@@ -177,7 +177,8 @@ class IntegratedLinePlot(QWidget):
         )
         
         # Handle view settings based on sync mode
-        if self.app_state.sync_state == "video_to_lineplot":
+        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
+        if sync_state in ["video_to_lineplot", "pyav_to_lineplot"]:
             # In video sync mode, immediately apply centered window
             self._update_window_position()
         else:
@@ -196,7 +197,8 @@ class IntegratedLinePlot(QWidget):
                      ymax: Optional[float], 
                      window_size: Optional[float]) -> None:
         """Apply axis limits from state values."""
-        if self.app_state.sync_state == "video_to_lineplot":
+        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
+        if sync_state in ["video_to_lineplot", "pyav_to_lineplot"]:
             # In video sync mode, update will happen via _update_window_position
             return
             
@@ -220,7 +222,7 @@ class IntegratedLinePlot(QWidget):
     
     def set_sync_mode(self, mode: str) -> None:
         """Public method to set sync mode."""
-        if mode == "video_to_lineplot":
+        if mode in ["video_to_lineplot", "pyav_to_lineplot"]:
             self._set_video_sync_mode()
         else:
             self._set_interactive_mode()
