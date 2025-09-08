@@ -24,7 +24,6 @@ class VideoSync(QObject):
     """Base class for video synchronization with common signals and interface."""
     
     frame_changed = Signal(int)  # Emitted when video frame changes
-    time_changed = Signal(float)  # Emitted when playback time changes
     playback_state_changed = Signal(bool)  # Emitted when play/pause state changes
     
     def __init__(self, viewer: napari.Viewer, app_state, video_source: str, audio_source: Optional[str] = None):
@@ -39,8 +38,7 @@ class VideoSync(QObject):
         self.current_time = 0.0
         self.total_frames = 0
         self.total_duration = 0.0
-        self.is_playing = False
-        self.fps = getattr(app_state.ds, 'fps', 30.0) if hasattr(app_state, 'ds') else 30.0
+        self.fps = app_state.ds.fps
         self.fps_playback = getattr(app_state, 'fps_playback', self.fps)
         
         # Audio properties
@@ -51,6 +49,18 @@ class VideoSync(QObject):
                     self.sr = data.rate
             except:
                 self.sr = 44100
+    
+    @property
+    def is_playing(self) -> bool:
+        """Get current playing state. Must be implemented by subclasses."""
+        raise NotImplementedError
+        
+    def toggle_play_pause(self):
+        """Toggle between play and pause states."""
+        if self.is_playing:
+            self.pause()
+        else:
+            self.resume()
     
     def start(self):
         """Start video playback. Must be implemented by subclasses."""
@@ -86,11 +96,9 @@ class VideoSync(QObject):
         self.current_time = frame_number / self.fps
         self.app_state.current_frame = frame_number
         self.frame_changed.emit(frame_number)
-        self.time_changed.emit(self.current_time)
     
     def _emit_playback_state_changed(self, is_playing: bool):
         """Emit playback state changed signal."""
-        self.is_playing = is_playing
         self.playback_state_changed.emit(is_playing)
 
 
@@ -103,7 +111,6 @@ class StreamingVideoSync(VideoSync):
         
         self.enable_audio = enable_audio
         self.audio_buffer_size = audio_buffer_size
-        self.start_paused = start_paused
         
         # Queues for frames and audio
         self.frame_queue = queue.Queue(maxsize=30)
@@ -111,7 +118,7 @@ class StreamingVideoSync(VideoSync):
         
         # State management
         self.is_running = False
-        self.is_paused = start_paused  # Start paused by default
+        self._is_playing = False
         self.seek_requested = False
         self.seek_position = 0
         
@@ -139,6 +146,11 @@ class StreamingVideoSync(VideoSync):
         self.timer.timeout.connect(self.update_frame)
         
         self.wait_time = 0.1
+    
+    @property
+    def is_playing(self) -> bool:
+        """Return current playing state."""
+        return self._is_playing
     
     def _initialize_video(self):
         """Initialize video stream."""
@@ -190,9 +202,8 @@ class StreamingVideoSync(VideoSync):
         
         # Start playback
         self.is_running = True
-        if not self.start_paused:
-            self.start_time = time.time()
-        self._emit_playback_state_changed(not self.is_paused)
+        self.start_time = time.time()
+        self._emit_playback_state_changed(self._is_playing)
         
         # Start the decoding thread
         self.decode_thread = threading.Thread(target=self._decode_frames)
@@ -236,7 +247,7 @@ class StreamingVideoSync(VideoSync):
                     
                     self.seek_requested = False
                  
-                if self.is_paused:
+                if not self._is_playing:
                     time.sleep(self.wait_time) 
                     continue
                 
@@ -245,7 +256,7 @@ class StreamingVideoSync(VideoSync):
                     if not self.is_running or self.seek_requested:
                         break
                     
-                    if self.is_paused:
+                    if not self._is_playing:
                         break
                         
                     for frame in packet.decode():
@@ -292,13 +303,13 @@ class StreamingVideoSync(VideoSync):
                     while self.seek_requested:
                         time.sleep(0.01)
                 
-                if self.is_paused:
+                if not self._is_playing:
                     time.sleep(self.wait_time)
                     continue
                 
                 # Decode and play audio
                 for packet in self.audio_container.demux(self.audio_stream):
-                    if not self.is_running or self.seek_requested or self.is_paused:
+                    if not self.is_running or self.seek_requested or not self._is_playing:
                         break
                         
                     for frame in packet.decode():
@@ -353,8 +364,8 @@ class StreamingVideoSync(VideoSync):
     
     def pause(self):
         """Pause playback"""
-        if not self.is_paused:
-            self.is_paused = True
+        if self._is_playing:
+            self._is_playing = False
             self.pause_time = time.time()
             self._clear_frame_queue()
             if self.enable_audio:
@@ -363,18 +374,12 @@ class StreamingVideoSync(VideoSync):
     
     def resume(self):
         """Resume playback"""
-        if self.is_paused:
+        if not self._is_playing:
             if self.pause_time:
                 self.accumulated_pause_time += time.time() - self.pause_time
-            self.is_paused = False
+            self._is_playing = True
             self._emit_playback_state_changed(True)
     
-    def toggle_pause(self):
-        """Toggle between pause and play"""
-        if self.is_paused:
-            self.resume()
-        else:
-            self.pause()
     
     def _clear_frame_queue(self):
         """Clear all frames from the frame queue"""
@@ -442,6 +447,11 @@ class NapariVideoSync(VideoSync):
         
         self._setup_video_layer()
     
+    @property
+    def is_playing(self) -> bool:
+        """Return current playing state from napari."""
+        return self._napari_is_playing()
+    
     def _setup_video_layer(self) -> None:
         """Setup napari video layer reference."""
         if not self.video_source:
@@ -461,6 +471,15 @@ class NapariVideoSync(VideoSync):
         if hasattr(self.video_layer.data, 'shape'):
             self.total_frames = self.video_layer.data.shape[0]
             self.total_duration = self.total_frames / self.fps
+        
+        # Connect to napari's dimension changes to emit frame_changed signals
+        self.viewer.dims.events.current_step.connect(self._on_napari_step_change)
+    
+    def _on_napari_step_change(self, event=None):
+        """Handle napari dimension step changes and emit frame_changed signal."""
+        if hasattr(self.viewer.dims, 'current_step') and len(self.viewer.dims.current_step) > 0:
+            frame_number = self.viewer.dims.current_step[0]
+            self._emit_frame_changed(frame_number)
     
     def _napari_is_playing(self) -> bool:
         """Check if napari is currently playing using internal functions."""
@@ -503,13 +522,13 @@ class NapariVideoSync(VideoSync):
         else:
             frame_number = position
         self.seek_to_frame(frame_number)
-    
-    def play_segment(self, start_time: float, end_time: float):
-        """Play a specific segment from start_time to end_time with audio."""
-        start_frame = int(start_time * self.fps)
-        end_frame = int(end_time * self.fps)
-        
-        # Video 
+
+    def play_segment(self, start_frame: int, end_frame: int):
+        """Play a specific segment from start_frame to end_frame with audio."""
+        start_time = start_frame / self.fps
+        end_time = end_frame / self.fps
+
+        # Video
         qt_dims = self.viewer.window._qt_viewer.dims
         self.seek_to_frame(start_frame)
         
@@ -533,7 +552,7 @@ class NapariVideoSync(VideoSync):
                 
         qt_dims.play(axis=0, fps=self.fps_playback, loop_mode="once", frame_range=(start_frame, end_frame))
         
-        # Monitor playback and cleanup audio when video stops
+        # Monitor playback and cleanup audio when video stops, then reset frame range
         if player:
             def monitor_playback(qt_viewer):
                 while _get_current_play_status(qt_viewer):
@@ -546,10 +565,15 @@ class NapariVideoSync(VideoSync):
                 daemon=True
             )
             monitor_thread.start()
-
     def stop(self):
         """Stop playback and cleanup."""
         # Stop napari video
         if self._napari_is_playing():
             self.pause()
         self._emit_playback_state_changed(False)
+        
+        # Disconnect napari events
+        try:
+            self.viewer.dims.events.current_step.disconnect(self._on_napari_step_change)
+        except:
+            pass
