@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 
 from .data_loader import load_dataset
-from .napari_video_sync import NapariVideoPlayer
+from .video_sync import NapariVideoSync, StreamingVideoSync
 from .audio_cache import SharedAudioCache
 from movformer.utils.xr_utils import sel_valid
 import napari
@@ -49,7 +49,7 @@ class DataWidget(DataLoader, QWidget):
         self.setLayout(QFormLayout())
         self.app_state = app_state
         self.meta_widget = meta_widget
-        self.sync_manager: Optional[NapariVideoPlayer] = None
+        self.sync_manager = None  # Will be either NapariVideoSync or StreamingVideoSync
         self.lineplot = None  # Will be set after creation
         self.labels_widget = None  # Will be set after creation
         self.plots_widget = None  # Will be set after creation
@@ -514,16 +514,9 @@ class DataWidget(DataLoader, QWidget):
 
 
     def _update_video_audio(self):
-        """Update video and audio using napari video plugin and new sync manager."""
+        """Update video and audio using appropriate sync manager based on sync_state."""
         if not self.app_state.ready or not self.app_state.video_folder:
             return
-
- 
-
-        # Remove all previous video layers
-        for layer in list(self.viewer.layers):
-            if layer.name == "video":
-                self.viewer.layers.remove(layer)
 
         # Stop existing sync manager
         if self.sync_manager:
@@ -540,13 +533,8 @@ class DataWidget(DataLoader, QWidget):
         video_path = os.path.join(self.app_state.video_folder, video_file)
         self.app_state.video_path = os.path.normpath(video_path)
 
-        # Load video using napari-video plugin
-        self.viewer.open(self.app_state.video_path, name="video", plugin="napari_video")
-        video_layer = self.viewer.layers["video"]
-        video_index = self.viewer.layers.index(video_layer)
-        self.viewer.layers.move(video_index, 0)  # Move to bottom layer
-
         # Set up audio path if available
+        audio_path = None
         if self.app_state.audio_folder and hasattr(self.app_state, 'mics_sel'):
             try:
                 audio_file = (
@@ -557,19 +545,50 @@ class DataWidget(DataLoader, QWidget):
                 audio_path = os.path.join(self.app_state.audio_folder, audio_file)
                 self.app_state.audio_path = os.path.normpath(audio_path)
             except (KeyError, AttributeError):
-                audio_path = None
+                self.app_state.audio_path = None
 
-        # Create new sync manager to handle napari video + audio coordination
-        self.sync_manager = NapariVideoPlayer(
-            viewer=self.viewer,
-            app_state=self.app_state,
-            video_path=self.app_state.video_path,
-            audio_path=self.app_state.audio_path
-        )
+        # Choose video player based on sync_state
+        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
+        
+        if sync_state == 'pyav_to_lineplot':
+            # Use fast streaming player (StreamingVideoSync)
+            # Remove any existing video layers since streaming player creates its own
+            for layer in list(self.viewer.layers):
+                if layer.name in ["video", "Video Stream"]:
+                    self.viewer.layers.remove(layer)
+                    
+            self.sync_manager = StreamingVideoSync(
+                viewer=self.viewer,
+                app_state=self.app_state,
+                video_source=self.app_state.video_path,
+                audio_source=self.app_state.audio_path
+            )
+            # Start streaming for pyav player
+            self.sync_manager.start()
+            
+        else:
+            # Use accurate napari player (NapariVideoSync) for video_to_lineplot and lineplot_to_video
+            # Remove any existing video layers
+            for layer in list(self.viewer.layers):
+                if layer.name in ["video", "Video Stream"]:
+                    self.viewer.layers.remove(layer)
+                    
+            # Load video using napari-video plugin
+            self.viewer.open(self.app_state.video_path, name="video", plugin="napari_video")
+            video_layer = self.viewer.layers["video"]
+            video_index = self.viewer.layers.index(video_layer)
+            self.viewer.layers.move(video_index, 0)  # Move to bottom layer
+            
+            self.sync_manager = NapariVideoSync(
+                viewer=self.viewer,
+                app_state=self.app_state,
+                video_source=self.app_state.video_path,
+                audio_source=self.app_state.audio_path
+            )
 
-        # Connect sync manager frame changes to app state
+        # Connect sync manager frame changes to app state and lineplot
         self.sync_manager.frame_changed.connect(self._on_sync_frame_changed)
-
+        
         # Store reference in app_state for compatibility with other widgets
         self.app_state.sync_manager = self.sync_manager
 

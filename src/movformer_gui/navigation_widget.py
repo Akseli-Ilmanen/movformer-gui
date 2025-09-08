@@ -97,6 +97,9 @@ class NavigationWidget(QWidget):
         elif current_index == 2:
             new_mode = "pyav_to_lineplot"
 
+        # Update app state
+        self.app_state.sync_state = new_mode
+        
         # Emit signal for other components
         self.sync_mode_changed.emit(new_mode)
         
@@ -105,6 +108,9 @@ class NavigationWidget(QWidget):
             self.lineplot.set_sync_mode(new_mode)
             self.lineplot.update_plot()
         
+        # Trigger video player switching by updating video/audio
+        if self.data_widget and self.app_state.ready:
+            self.data_widget._update_video_audio()
 
 
     def _trial_change_consequences(self):

@@ -1,20 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Read(/C:\\Users\\aksel/**)",
-      "mcp__Ref__ref_search_documentation",
-      "WebSearch",
-      "WebFetch(domain:bendalab.github.io)",
-      "WebFetch(domain:github.com)",
+      "Read",
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "Search",
+      "Grep",
       "Bash(python:*)",
-      "Bash(conda install:*)",
-      "Bash(find:*)",
-      "mcp__filesystem-readonly__list_directory",
+      "Bash(conda:*)",
+      "Bash(pip:*)",
       "Bash(dir:*)",
-      "Read(C:\\Users\\Admin\\Documents\\Akseli\\Code\\MovFormer\\movformer/**)",
-      "Read(/C:\\Users\\Admin\\Documents\\Akseli\\Code\\movformer-gui/**)"
+      "WebSearch",
+      "WebFetch",
+      "mcp__Ref__ref_search_documentation",
+      "mcp__filesystem-readonly__list_directory"
     ],
-    "deny": [],
-    "ask": []
+    "additionalDirectories": [
+      "C:\\Users\\Admin\\anaconda3\\envs"
+    ]
   }
 }
