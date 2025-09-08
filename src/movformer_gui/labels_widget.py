@@ -321,7 +321,7 @@ class LabelsWidget(QWidget):
 
         # Get current data from app_state
         ds_kwargs = self.app_state.get_ds_kwargs()
-        labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+        labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
         from qtpy.QtCore import Qt
 
@@ -397,7 +397,7 @@ class LabelsWidget(QWidget):
 
             # Get current labels from app_state
             ds_kwargs = self.app_state.get_ds_kwargs()
-            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+            labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
             start_idx = self.first_click
             end_idx = self.second_click
@@ -415,7 +415,7 @@ class LabelsWidget(QWidget):
             self.ready_for_click = False
 
             # Save updated labels back to dataset
-            self.app_state.ds["labels"].loc[ds_kwargs] = labels
+            self.app_state.ds["labels"].loc[filt_kwargs] = labels
 
             # Update plot
             time_data = self.app_state.ds.time.values
@@ -430,7 +430,10 @@ class LabelsWidget(QWidget):
 
             # Get current labels from app_state
             ds_kwargs = self.app_state.get_ds_kwargs()
-            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+
+
+            labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
+
 
             # Clear labels in the selected range (set to 0)
             labels[start : end + 1] = 0
@@ -440,7 +443,7 @@ class LabelsWidget(QWidget):
             self.current_motif_id = None
 
             # Save updated labels back to dataset
-            self.app_state.ds["labels"].loc[ds_kwargs] = labels
+            self.app_state.ds["labels"].loc[filt_kwargs] = labels
 
             # Update plot
             time_data = self.app_state.ds.time.values
@@ -456,7 +459,7 @@ class LabelsWidget(QWidget):
 
             # Get current labels from app_state
             ds_kwargs = self.app_state.get_ds_kwargs()
-            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+            labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
             # Clear labels in the selected range (set to 0)
             labels[old_start : old_end + 1] = 0
@@ -469,7 +472,7 @@ class LabelsWidget(QWidget):
             self.current_motif_id = None
 
             # Save updated labels back t3o dataset
-            self.app_state.ds["labels"].loc[ds_kwargs] = labels
+            self.app_state.ds["labels"].loc[filt_kwargs] = labels
 
             # Update plot
             time_data = self.app_state.ds.time.values

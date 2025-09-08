@@ -14,7 +14,9 @@
       "WebSearch",
       "WebFetch",
       "mcp__Ref__ref_search_documentation",
-      "mcp__filesystem-readonly__list_directory"
+      "mcp__filesystem-readonly__list_directory",
+      "mcp__filesystem-readonly__search_files",
+      "mcp__filesystem-readonly__read_text_file"
     ],
     "additionalDirectories": [
       "C:\\Users\\Admin\\anaconda3\\envs",

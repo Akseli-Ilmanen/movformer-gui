@@ -190,7 +190,7 @@ def plot_ds_variable(plot_item, ds, ds_kwargs, variable, color_variable=None):
     var = ds[variable]
     time = ds["time"].values
 
-    data = sel_valid(var, ds_kwargs)
+    data, _ = sel_valid(var, ds_kwargs)
     plot_items = []
 
     if data.ndim == 2:
@@ -198,7 +198,7 @@ def plot_ds_variable(plot_item, ds, ds_kwargs, variable, color_variable=None):
         plot_items = plot_multidim(plot_item, time, data, coord_labels, plot_items)
 
     elif data.ndim == 1:
-        color_data = sel_valid(ds[color_variable], ds_kwargs) if color_variable in ds.data_vars else None
+        color_data, _ = sel_valid(ds[color_variable], ds_kwargs) if color_variable in ds.data_vars else None
 
         # Build changepoints_dict from ds attributes, inspired by plots.py
         changepoints_dict = {}
@@ -276,9 +276,21 @@ def apply_view_settings(plot_item, app_state, preserve_xlim=None):
     if ymin is not None and ymax is not None:
         vb.setYRange(float(ymin), float(ymax), padding=0)
     
-    # Set x-limits
+    # Set x-limits with data bounds awareness
     if preserve_xlim and len(preserve_xlim) == 2:
-        vb.setXRange(preserve_xlim[0], preserve_xlim[1], padding=0)
+        # Constrain preserved xlim to data bounds
+        if hasattr(app_state, 'ds') and app_state.ds is not None:
+            time = app_state.ds.time.values
+            if len(time) > 0:
+                data_tmin = float(time[0])
+                data_tmax = float(time[-1])
+                x0 = max(preserve_xlim[0], data_tmin - (data_tmax - data_tmin) * 0.01)
+                x1 = min(preserve_xlim[1], data_tmax + (data_tmax - data_tmin) * 0.01)
+                vb.setXRange(x0, x1, padding=0)
+            else:
+                vb.setXRange(preserve_xlim[0], preserve_xlim[1], padding=0)
+        else:
+            vb.setXRange(preserve_xlim[0], preserve_xlim[1], padding=0)
     elif hasattr(app_state, 'ds'):
         time = app_state.ds.time.values
         window_size = app_state.get_with_default("window_size")

@@ -54,7 +54,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         # Set size policy to allow vertical expansion but with preferred minimum
         self.lineplot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Set minimum height to roughly 1/3 of typical screen height
+        # Set minimum height to roughly 1/3 of typical screen height but leave space for notifications
         try:
             screen = QApplication.primaryScreen()
             if screen is not None:
@@ -63,10 +63,24 @@ class MetaWidget(CollapsibleWidgetContainer):
                 screen_height = 1080  # fallback default
         except (AttributeError, RuntimeError):
             screen_height = 1080  # fallback default
-        lineplot_height = int(screen_height * 0.33)
+        # Reduce lineplot height to leave space for notifications (25% instead of 33%)
+        lineplot_height = int(screen_height * 0.25)
         self.lineplot.setMinimumHeight(lineplot_height)
+        # Set maximum height to prevent it from growing too large
+        self.lineplot.setMaximumHeight(int(screen_height * 0.4))
 
-        self.viewer.window.add_dock_widget(self.lineplot, area="bottom")
+        # Add dock widget with margins to prevent covering notifications
+        dock_widget = self.viewer.window.add_dock_widget(self.lineplot, area="bottom")
+        
+        # Try to set margins on the dock widget to leave space for notifications
+        try:
+            if hasattr(dock_widget, 'setContentsMargins'):
+                dock_widget.setContentsMargins(0, 0, 0, 50)  # Leave 50px at bottom for notifications
+        except:
+            pass
+        
+        # Ensure napari notifications are positioned correctly
+        self._configure_notifications()
 
         # Create all widgets with app_state
         self.plots_widget = PlotsWidget(self.viewer, self.app_state)
@@ -96,8 +110,8 @@ class MetaWidget(CollapsibleWidgetContainer):
         # The one widget to rule them all (loading data, updating plots, managing sync)
         self.data_widget.set_references(self.lineplot, self.labels_widget, self.plots_widget, self.navigation_widget)
 
-        # Set maximum height constraints for widgets to respect lineplot 1/3 rule
-        remaining_height = int(screen_height * 0.67)  # 2/3 of screen for other widgets
+        # Set maximum height constraints for widgets to respect lineplot 25% rule
+        remaining_height = int(screen_height * 0.75)  # 3/4 of screen for other widgets
         max_widget_height = int(remaining_height / 6)  # Divide among 6 widgets roughly
 
         # Configure size policies and max heights for all widgets
@@ -201,11 +215,12 @@ class MetaWidget(CollapsibleWidgetContainer):
         # TO ADD documentation for inbuild pyqgt graph shortcuts
         # Right click hold - pull left/right to adjust xlim, up/down to adjust ylim
 
-        # # Pause/play video/audio
-        # @viewer.bind_key("space", overwrite=True)
-        # def toggle_play_pause(v):
-        #     self.data_widget.toggle_play_pause()
+        # Pause/play video/audio
         viewer = self.viewer
+        @viewer.bind_key("space", overwrite=True)
+        def toggle_play_pause(v):
+            self.data_widget.toggle_play_pause()
+        
 
         @viewer.bind_key("m", overwrite=True)
         def next_trial(v):
@@ -232,13 +247,13 @@ class MetaWidget(CollapsibleWidgetContainer):
         def adjust_ylim_down(v):
             self.plots_widget._adjust_ylim(-0.05)  # Decrease Y limits by 5%
 
-        @viewer.bind_key("Left", overwrite=True)
-        def jump_plot_left(v):
-            self.plots_widget._jump_plot(-1)  # Jump left by configured jump size
+        # @viewer.bind_key("Left", overwrite=True)
+        # def jump_plot_left(v):
+        #     self.plots_widget._jump_plot(-1)  # Jump left by configured jump size
 
-        @viewer.bind_key("Right", overwrite=True)
-        def jump_plot_right(v):
-            self.plots_widget._jump_plot(1)  # Jump right by configured jump size
+        # @viewer.bind_key("Right", overwrite=True)
+        # def jump_plot_right(v):
+        #     self.plots_widget._jump_plot(1)  # Jump right by configured jump size
 
         @viewer.bind_key("Shift-Left", overwrite=True)
         def adjust_window_smaller(v):
@@ -325,3 +340,29 @@ class MetaWidget(CollapsibleWidgetContainer):
                 font-size: {font_size}pt;
             }}
         """)
+    
+    def _configure_notifications(self):
+        """Configure napari notifications to be visible above docked widgets."""
+        try:
+            # Access napari's notification manager
+            if hasattr(self.viewer.window, '_qt_viewer'):
+                qt_viewer = self.viewer.window._qt_viewer
+                
+                # Try to access the notification overlay
+                if hasattr(qt_viewer, '_overlays'):
+                    for overlay in qt_viewer._overlays.values():
+                        if hasattr(overlay, 'setContentsMargins'):
+                            # Add bottom margin to keep notifications above docked widgets
+                            overlay.setContentsMargins(0, 0, 0, 60)
+                        
+                        # Try to adjust positioning
+                        if hasattr(overlay, 'resize') and hasattr(overlay, 'parent'):
+                            parent = overlay.parent()
+                            if parent:
+                                parent_rect = parent.geometry()
+                                # Position overlay to leave space at bottom
+                                overlay.resize(parent_rect.width(), parent_rect.height() - 80)
+                                
+        except Exception as e:
+            # Silently handle any issues with notification configuration
+            print(f"Notification configuration warning: {e}")

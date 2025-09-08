@@ -57,6 +57,13 @@ class IntegratedLinePlot(QWidget):
         
   
         
+        # Data bounds for smart zoom constraints
+        self._data_time_min = None
+        self._data_time_max = None
+        self._data_y_min = None
+        self._data_y_max = None
+        self._min_time_range = 0.001  # Minimum zoom range for time axis
+        
         # Store interaction state
         self._interaction_enabled = True
         self._last_window_center = None
@@ -97,12 +104,15 @@ class IntegratedLinePlot(QWidget):
         - Plot clicks jump video to that time
         - All keyboard shortcuts work
         - Manual control of view window
+        - Smart zoom constraints prevent zooming outside data range
         """
         self._interaction_enabled = True
         
         # Enable full mouse interactions with the plot
         self.vb.setMouseEnabled(x=True, y=True)
         
+        # Reapply zoom constraints in interactive mode
+        self._apply_zoom_constraints()
         
         # Hide time marker in interactive mode
         self.time_marker.hide()
@@ -149,6 +159,68 @@ class IntegratedLinePlot(QWidget):
         # Store for reference
         self._last_window_center = current_time
         
+    def _update_data_bounds(self):
+        """Update data bounds from current dataset for zoom constraints."""
+        if not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
+            return
+            
+        # Get time bounds
+        time = self.app_state.ds.time.values
+        self._data_time_min = float(time[0]) if len(time) > 0 else 0.0
+        self._data_time_max = float(time[-1]) if len(time) > 0 else 10.0
+        
+        # Set minimum time range based on data duration
+        total_duration = self._data_time_max - self._data_time_min
+        self._min_time_range = max(0.001, total_duration / 2**16)
+        
+        # Get current selection to estimate y bounds
+        try:
+            ds_kwargs = self.app_state.get_ds_kwargs()
+            if hasattr(self.app_state, 'features_sel') and self.app_state.features_sel:
+                var = self.app_state.ds[self.app_state.features_sel]
+                data, _ = sel_valid(var, ds_kwargs)
+                if data.size > 0:
+                    self._data_y_min = float(np.nanmin(data))
+                    self._data_y_max = float(np.nanmax(data))
+                else:
+                    self._data_y_min = -1.0
+                    self._data_y_max = 1.0
+            else:
+                self._data_y_min = -1.0
+                self._data_y_max = 1.0
+        except:
+            self._data_y_min = -1.0
+            self._data_y_max = 1.0
+            
+        # Apply zoom constraints to viewbox
+        self._apply_zoom_constraints()
+    
+    def _apply_zoom_constraints(self):
+        """Apply data-aware zoom constraints to the plot viewbox."""
+        if (self._data_time_min is None or self._data_time_max is None or 
+            self._data_y_min is None or self._data_y_max is None):
+            return
+            
+        # Set time axis limits with small buffer
+        time_buffer = (self._data_time_max - self._data_time_min) * 0.01
+        self.vb.setLimits(
+            xMin=self._data_time_min - time_buffer,
+            xMax=self._data_time_max + time_buffer,
+            minXRange=self._min_time_range,
+            maxXRange=self._data_time_max - self._data_time_min + 2*time_buffer
+        )
+        
+        # Set y axis limits with buffer
+        y_range = self._data_y_max - self._data_y_min
+        if y_range > 0:
+            y_buffer = y_range * 0.1
+            min_y_range = max(y_range / 2**16, 0.001)
+            self.vb.setLimits(
+                yMin=self._data_y_min - y_buffer,
+                yMax=self._data_y_max + y_buffer,
+                minYRange=min_y_range,
+                maxYRange=y_range + 2*y_buffer
+            )
 
     
     def update_plot(self, t0: Optional[float] = None, 
@@ -156,6 +228,9 @@ class IntegratedLinePlot(QWidget):
         """Update the line plot with current data and time window."""
         if not hasattr(self.app_state, 'ds'):
             return
+        
+        # Update data bounds for zoom constraints
+        self._update_data_bounds()
         
         # Clear previous plot items
         clear_plot_items(self.plot_item, self.plot_items)

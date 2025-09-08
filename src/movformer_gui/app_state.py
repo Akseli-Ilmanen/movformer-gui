@@ -72,7 +72,6 @@ class ObservableAppState(QObject):
         locals()[f"{var}_changed"] = Signal(signal_type)
 
     data_updated = Signal()
-    current_time_changed = Signal(float)  # Special signal for computed property
     sync_state_changed = Signal(str)  # Signal for sync mode changes
 
     def __init__(self, yaml_path: str | None = None, auto_save_interval: int = 30000):
@@ -156,10 +155,18 @@ class ObservableAppState(QObject):
         ds_kwargs = {"trials": self.trials_sel}
         ds_kwargs["trials"] = int(ds_kwargs["trials"])
 
-        if hasattr(self, "keypoints_sel"):
-            ds_kwargs["keypoints"] = self.keypoints_sel
-        if hasattr(self, "individuals_sel"):
-            ds_kwargs["individuals"] = self.individuals_sel
+        # Only include dimensions that exist in the dataset
+        if self.ds is not None:
+            if hasattr(self, "keypoints_sel") and "keypoints" in self.ds.dims:
+                ds_kwargs["keypoints"] = self.keypoints_sel
+            if hasattr(self, "individuals_sel") and "individuals" in self.ds.dims:
+                ds_kwargs["individuals"] = self.individuals_sel
+        else:
+            # Fallback for when dataset isn't loaded yet
+            if hasattr(self, "keypoints_sel"):
+                ds_kwargs["keypoints"] = self.keypoints_sel
+            if hasattr(self, "individuals_sel"):
+                ds_kwargs["individuals"] = self.individuals_sel
         return ds_kwargs
 
     def key_sel_exists(self, type_key: str) -> bool:
@@ -200,7 +207,7 @@ class ObservableAppState(QObject):
 
         # Save dynamic _sel attributes
         for attr in dir(self):
-            if attr.endswith("_sel") and not attr.startswith("_") and attr != "individuals_sel":
+            if attr.endswith("_sel") and not attr.startswith("_"):
                 try:
                     value = getattr(self, attr)
                     if not callable(value) and value is not None:

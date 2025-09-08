@@ -180,11 +180,8 @@ class NavigationController:
             
     def toggle_playback(self):
         """Toggle video/audio playback."""
-        if hasattr(self.app_state, 'stream'):
-            if self.app_state.stream.is_paused:
-                self.app_state.stream.resume()
-            else:
-                self.app_state.stream.pause()
+        if hasattr(self.app_state, 'sync_manager') and self.app_state.sync_manager:
+            self.app_state.sync_manager.toggle_play_pause()
                 
     def reset_view(self):
         """Reset to default view."""

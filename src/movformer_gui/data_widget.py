@@ -18,7 +18,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from movformer.utils.xr_utils import sel_valid
 
 from .audio_cache import SharedAudioCache
 from .data_loader import load_dataset
@@ -226,8 +225,10 @@ class DataWidget(DataLoader, QWidget):
             combo = self.io_widget.combos.get(key) or self.combos.get(key)
 
             if combo is not None:
+            
                 if self.app_state.key_sel_exists(key):
                     combo.setCurrentText(str(self.app_state.get_key_sel(key)))
+                    
                 elif key == "trial_conditions":
                     # Always default to None
                     combo.setCurrentText("None")
@@ -236,6 +237,16 @@ class DataWidget(DataLoader, QWidget):
                     # Default to first value
                     combo.setCurrentText(str(vars[0]))
                     self.app_state.set_key_sel(key, str(vars[0]))
+                    
+                if key == "individuals":
+                   individual = self.app_state.get_key_sel("individuals")
+
+                   if self.all_data_vars_nan(individual):
+                       first_individual_with_data = self.find_first_individual_with_data()
+                       combo.setCurrentText(first_individual_with_data)
+                       self.app_state.set_key_sel(key, first_individual_with_data)
+                       
+
 
         if self.app_state.key_sel_exists("trials"):
             self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.get_key_sel("trials")))
@@ -244,6 +255,30 @@ class DataWidget(DataLoader, QWidget):
             # Default to first value
             self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials[0]))
             self.app_state.trials_sel = int(self.app_state.trials[0])
+
+
+
+    def all_data_vars_nan(self, individual) -> bool:
+        """
+        Check if all data variables in the selected subset are entirely NaN.
+        """
+        ds = self.app_state.ds
+        subset = ds.sel(individuals=individual).filter_by_attrs(type="features")
+        return all(subset[var].isnull().all() for var in subset.data_vars)
+
+
+    def find_first_individual_with_data(self) -> str | None:
+        """
+        Find the first individual that has non-NaN data in any data variable.
+        """
+        ds = self.app_state.ds
+        
+        for individual in ds.individuals.values:
+            individual = str(individual)
+            if not self.all_data_vars_nan(individual):
+                return individual
+    
+
 
 
     def _update_trial_condition_values(self):
@@ -308,7 +343,7 @@ class DataWidget(DataLoader, QWidget):
             ds_kwargs = self.app_state.get_ds_kwargs()
             time_data = ds.time.values
 
-            labels = sel_valid(self.app_state.ds.labels, ds_kwargs)
+            labels, _ = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
             self.labels_widget.plot_all_motifs(time_data, labels)
 
@@ -348,6 +383,9 @@ class DataWidget(DataLoader, QWidget):
             except (KeyError, AttributeError):
                 self.app_state.audio_path = None
 
+        # Store current frame to preserve position when switching sync modes
+        current_frame = getattr(self.app_state, 'current_frame', 0)
+        
         # Choose video player based on sync_state
         sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
         
@@ -366,6 +404,11 @@ class DataWidget(DataLoader, QWidget):
             )
             # Start streaming for pyav player
             self.sync_manager.start()
+            self.sync_manager.pause()
+            
+            # Seek to current frame to preserve position
+            if current_frame > 0:
+                self.sync_manager.seek_to_frame(current_frame)
             
         else:
             # Use accurate napari player (NapariVideoSync) for video_to_lineplot and lineplot_to_video
@@ -386,6 +429,10 @@ class DataWidget(DataLoader, QWidget):
                 video_source=self.app_state.video_path,
                 audio_source=self.app_state.audio_path
             )
+            
+            # Seek to current frame to preserve position
+            if current_frame > 0:
+                self.sync_manager.seek_to_frame(current_frame)
 
         # Connect sync manager frame changes to app state and lineplot
         self.sync_manager.frame_changed.connect(self._on_sync_frame_changed)
@@ -434,25 +481,20 @@ class DataWidget(DataLoader, QWidget):
             self._add_boxes_layer()
         self._set_initial_state()
 
-    # def toggle_play_pause(self):
-    #     """Toggle play/pause state of the video/audio stream."""
-    #     if not self.app_state.stream:
-    #         return
+    def toggle_play_pause(self):
+        """Toggle play/pause state of the video/audio stream."""
+        if not self.sync_manager:
+            return
+        self.sync_manager.toggle_play_pause()
 
-    #     if self.app_state.stream.is_paused:
-    #         self.navigation_widget.sync_toggle_btn.setCurrentIndex(0) # "video_to_lineplot"
-    #         self.app_state.stream.resume()
-    #     else:
-    #         self.navigation_widget.sync_toggle_btn.setCurrentIndex(1) # "lineplot_to_video"
-    #         self.app_state.stream.pause()
 
     def closeEvent(self, event):
         """Clean up video stream and data cache."""
 
         SharedAudioCache.clear_cache()
 
-        if hasattr(self.app_state, "stream") and self.app_state.stream:
-            self.app_state.stream.stop()
+        if hasattr(self.app_state, "sync_manager") and self.app_state.sync_manager:
+            self.app_state.sync_manager.stop()
 
         super().closeEvent(event)
 
