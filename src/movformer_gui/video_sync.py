@@ -321,7 +321,6 @@ class StreamingVideoSync(VideoSync):
                 if self.image_layer is not None:
 
                     self.image_layer.data = frame
-                    
                     self._emit_frame_changed(frame_number)
         except queue.Empty:
             pass
@@ -414,11 +413,6 @@ class StreamingVideoSync(VideoSync):
         except:
             pass
         
-        # Clean up shortcuts
-        if hasattr(self, '_shortcuts'):
-            for shortcut in self._shortcuts:
-                shortcut.setEnabled(False)
-            self._shortcuts.clear()
         
         # Clean up video
         if self.video_container:

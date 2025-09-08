@@ -64,11 +64,18 @@ pip install -e ".[testing]"
 - Manages dataset, file paths, plot settings, current selections
 - Dynamic `_sel` attributes for user selections (trials_sel, keypoints_sel, etc.)
 
-**DataWidget** (`data_widget.py`) - Data loading and trial navigation:
-- File/folder selection for NetCDF data, videos, audio
-- Dynamic combo boxes based on dataset dimensions
-- Trial filtering by conditions
-- Video/audio synchronization with napari playback
+**IOWidget** (`io_widget.py`) - Data and media file management:
+- File/folder selection dialogs for NetCDF datasets, video, and audio files
+- Handles loading and saving of datasets and user sessions
+- Validates file formats and paths before loading
+- Provides feedback on IO operations and errors
+
+**DataWidget** (`data_widget.py`) - Dataset exploration and trial navigation:
+- Displays dataset structure and metadata
+- Dynamic combo boxes for selecting trials, individuals, and features based on loaded dataset
+- Trial filtering by user-defined conditions
+- Coordinates selection changes with other widgets
+- Synchronizes trial and selection state with video/audio playback
 
 **LinePlot** (`lineplot.py`) - Main plotting widget:
 - Matplotlib-based time series visualization
