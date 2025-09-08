@@ -336,6 +336,8 @@ class StreamingVideoSync(VideoSync):
         except queue.Empty:
             pass
     
+    # Streamer -> mainly use seek
+    # NapariVideo -> mainly use seek_to_frame
     def seek(self, position: Union[float, int]):
         """Seek to specific position in the video"""
         if isinstance(position, int):
@@ -444,6 +446,7 @@ class NapariVideoSync(VideoSync):
         
         # Video layer reference
         self.video_layer = None
+        self.jump_frame = None
         
         self._setup_video_layer()
     
@@ -527,7 +530,7 @@ class NapariVideoSync(VideoSync):
         """Play a specific segment from start_frame to end_frame with audio."""
         start_time = start_frame / self.fps
         end_time = end_frame / self.fps
-
+        
         # Video
         qt_dims = self.viewer.window._qt_viewer.dims
         self.seek_to_frame(start_frame)
@@ -546,28 +549,46 @@ class NapariVideoSync(VideoSync):
 
             slow_down_factor = self.fps_playback / self.fps
             rate = slow_down_factor * self.sr
-        
+            
             player = PlayAudio()
             player.play(data=segment, rate=float(rate), blocking=False)
-                
-        qt_dims.play(axis=0, fps=self.fps_playback, loop_mode="once", frame_range=(start_frame, end_frame))
         
-        # Monitor playback and cleanup audio when video stops, then reset frame range
-        if player:
-            def monitor_playback(qt_viewer):
-                while _get_current_play_status(qt_viewer):
-                    time.sleep(0.1)
+        # Use loop mode to prevent auto-reset
+        qt_dims.play(axis=0, fps=self.fps_playback, loop_mode="once", 
+                    frame_range=(start_frame, end_frame))
+        
+        
+
+        
+        # Monitor playback and preserve frame position when it stops
+        def monitor_playback(qt_viewer, qt_dims_ref):
+            while _get_current_play_status(qt_viewer):
+                time.sleep(0.1) 
+            
+
+            # Clean up audio
+            if player:
                 player.stop()
                 player.__exit__(None, None, None)
+                
+   
             
-            monitor_thread = threading.Thread(
-                target=lambda: monitor_playback(self.qt_viewer), 
-                daemon=True
-            )
-            monitor_thread.start()
+            
+        monitor_thread = threading.Thread(
+            target=lambda: monitor_playback(self.qt_viewer, qt_dims), 
+            daemon=True
+        )
+        monitor_thread.start()
+        
+        
+        
+        
+
+        
+        
     def stop(self):
-        """Stop playback and cleanup."""
-        # Stop napari video
+        """Stop playback and cleanup.""" 
+        # Stop napari video 
         if self._napari_is_playing():
             self.pause()
         self._emit_playback_state_changed(False)
