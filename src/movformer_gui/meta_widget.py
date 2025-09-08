@@ -11,8 +11,8 @@ from .app_state import ObservableAppState
 from .data_widget import DataWidget
 from .integrated_lineplot import IntegratedLinePlot
 from .labels_widget import LabelsWidget
-from .napari_video_sync import NapariVideoPlayer
 from .navigation_widget import NavigationWidget
+from .io_widget import IOWidget
 from .plot_widgets import PlotsWidget
 from .shortcuts_dialog import ShortcutsWidget
 
@@ -25,6 +25,9 @@ class MetaWidget(CollapsibleWidgetContainer):
 
         # Store the napari viewer reference
         self.viewer = napari_viewer
+
+        # Set smaller font for this widget and all children
+        self._set_compact_font()
 
         # Create centralized app_state with YAML persistence
         yaml_path = self._default_yaml_path()
@@ -70,12 +73,16 @@ class MetaWidget(CollapsibleWidgetContainer):
         self.labels_widget = LabelsWidget(self.viewer, self.app_state)
         self.shortcuts_widget = ShortcutsWidget(self.app_state)
         self.navigation_widget = NavigationWidget(self.viewer, self.app_state)
-        self.sync_manager = NapariVideoPlayer(self.viewer, self.app_state, None)
-        self.data_widget = DataWidget(self.viewer, self.app_state, self)
+        
+        # Create I/O widget first, then pass it to data widget
+        self.io_widget = IOWidget(self.app_state, None)  # Will set data_widget reference after creation
+        self.data_widget = DataWidget(self.viewer, self.app_state, self, self.io_widget)
+        
+        # Now set the data_widget reference in io_widget
+        self.io_widget.data_widget = self.data_widget
 
         # Set navigation_widget reference in app_state for property callback
         self.app_state.lineplot = self.lineplot
-        self.app_state.sync_manager = self.sync_manager
 
         # Set up cross-references between widgets, so they can talk to each other
 
@@ -91,11 +98,12 @@ class MetaWidget(CollapsibleWidgetContainer):
 
         # Set maximum height constraints for widgets to respect lineplot 1/3 rule
         remaining_height = int(screen_height * 0.67)  # 2/3 of screen for other widgets
-        max_widget_height = int(remaining_height / 5)  # Divide among 5 widgets roughly
+        max_widget_height = int(remaining_height / 6)  # Divide among 6 widgets roughly
 
         # Configure size policies and max heights for all widgets
         for widget in [
             self.shortcuts_widget,
+            self.io_widget,
             self.data_widget,
             self.labels_widget,
             self.plots_widget,
@@ -109,6 +117,12 @@ class MetaWidget(CollapsibleWidgetContainer):
             self.shortcuts_widget,
             collapsible=True,
             widget_title="Shortcuts and Help",  # Add explain images and helpful GitHub links
+        )
+
+        self.add_widget(
+            self.io_widget,
+            collapsible=True,
+            widget_title="I/O",
         )
 
         self.add_widget(
@@ -279,3 +293,35 @@ class MetaWidget(CollapsibleWidgetContainer):
         @viewer.bind_key("d", overwrite=True)
         def delete_motif(v):
             labels_widget._delete_motif()
+            
+            
+            
+    def _set_compact_font(self, font_size: int = 8):
+        """Apply compact font to this widget and all children."""
+        from qtpy.QtGui import QFont
+        
+        font = QFont()
+        font.setPointSize(font_size)
+        self.setFont(font)
+        
+        # Optional: Apply stylesheet for more control
+        self.setStyleSheet(f"""
+            * {{
+                font-size: {font_size}pt;
+            }}
+            QLabel {{
+                font-size: {font_size}pt;
+            }}
+            QPushButton {{
+                font-size: {font_size}pt;
+            }}
+            QComboBox {{
+                font-size: {font_size}pt;
+            }}
+            QSpinBox, QDoubleSpinBox {{
+                font-size: {font_size}pt;
+            }}
+            QLineEdit {{
+                font-size: {font_size}pt;
+            }}
+        """)

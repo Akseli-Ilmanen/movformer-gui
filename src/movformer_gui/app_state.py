@@ -88,7 +88,6 @@ class ObservableAppState(QObject):
 
         self.lineplot = None
         # Reference to sync manager (replaces old stream)
-        self.sync_manager = None
 
     def _get_fps(self) -> float | None:
         """Get FPS from dataset, with caching."""
@@ -120,7 +119,6 @@ class ObservableAppState(QObject):
             "_auto_save_timer",
             "navigation_widget",
             "lineplot",
-            "sync_manager",
         ):
             super().__setattr__(name, value)
             return
@@ -202,7 +200,7 @@ class ObservableAppState(QObject):
 
         # Save dynamic _sel attributes
         for attr in dir(self):
-            if attr.endswith("_sel") and not attr.startswith("_"):
+            if attr.endswith("_sel") and not attr.startswith("_") and attr != "individuals_sel":
                 try:
                     value = getattr(self, attr)
                     if not callable(value) and value is not None:

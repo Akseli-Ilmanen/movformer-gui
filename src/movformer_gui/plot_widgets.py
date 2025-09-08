@@ -1,6 +1,6 @@
 """Enhanced plot widgets with sync mode awareness."""
 
-from qtpy.QtWidgets import (QFormLayout, QLineEdit, QWidget, QPushButton, 
+from qtpy.QtWidgets import (QGridLayout, QLineEdit, QWidget, QPushButton, 
                             QVBoxLayout, QLabel, QCheckBox)
 from napari.viewer import Viewer
 from typing import Optional
@@ -33,8 +33,8 @@ class PlotsWidget(QWidget):
         reset_button.clicked.connect(self._reset_to_defaults)
         main_layout.addWidget(reset_button)
         
-        # Form layout for controls
-        layout = QFormLayout()
+        # Grid layout for controls in 2 columns
+        layout = QGridLayout()
         main_layout.addLayout(layout)
 
         self.ymin_edit = QLineEdit()
@@ -46,14 +46,30 @@ class PlotsWidget(QWidget):
         self.audio_buffer_edit = QLineEdit()
         self.spec_buffer_edit = QLineEdit()
 
-        layout.addRow("Y min (lineplot):", self.ymin_edit)
-        layout.addRow("Y max (lineplot):", self.ymax_edit)
-        layout.addRow("Y min (spectrogram):", self.spec_ymin_edit)
-        layout.addRow("Y max (spectrogram):", self.spec_ymax_edit)
-        layout.addRow("Window size (s):", self.window_s_edit)
-        layout.addRow("Jump size (s)*:", self.jump_size_edit)
-        layout.addRow("Audio buffer (s):", self.audio_buffer_edit)
-        layout.addRow("Spectrogram buffer (x):", self.spec_buffer_edit)
+        # Arrange controls in pairs (2 columns)
+        # Row 0: Y min/max (lineplot)
+        layout.addWidget(QLabel("Y min (lineplot):"), 0, 0)
+        layout.addWidget(self.ymin_edit, 0, 1)
+        layout.addWidget(QLabel("Y max (lineplot):"), 0, 2)
+        layout.addWidget(self.ymax_edit, 0, 3)
+        
+        # Row 1: Y min/max (spectrogram)
+        layout.addWidget(QLabel("Y min (spectrogram):"), 1, 0)
+        layout.addWidget(self.spec_ymin_edit, 1, 1)
+        layout.addWidget(QLabel("Y max (spectrogram):"), 1, 2)
+        layout.addWidget(self.spec_ymax_edit, 1, 3)
+        
+        # Row 2: Window size / Jump size
+        layout.addWidget(QLabel("Window size (s):"), 2, 0)
+        layout.addWidget(self.window_s_edit, 2, 1)
+        layout.addWidget(QLabel("Jump size (s)*:"), 2, 2)
+        layout.addWidget(self.jump_size_edit, 2, 3)
+        
+        # Row 3: Audio buffer / Spectrogram buffer
+        layout.addWidget(QLabel("Audio buffer (s):"), 3, 0)
+        layout.addWidget(self.audio_buffer_edit, 3, 1)
+        layout.addWidget(QLabel("Spectrogram buffer (x):"), 3, 2)
+        layout.addWidget(self.spec_buffer_edit, 3, 3)
         
         # Note about jump size
         self.jump_note_label = QLabel("*Jump size only works in LinePlot → Video mode")

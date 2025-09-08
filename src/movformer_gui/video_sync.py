@@ -103,6 +103,7 @@ class StreamingVideoSync(VideoSync):
         
         self.enable_audio = enable_audio
         self.audio_buffer_size = audio_buffer_size
+        self.start_paused = start_paused
         
         # Queues for frames and audio
         self.frame_queue = queue.Queue(maxsize=30)
@@ -110,7 +111,7 @@ class StreamingVideoSync(VideoSync):
         
         # State management
         self.is_running = False
-        self.is_paused = False
+        self.is_paused = start_paused  # Start paused by default
         self.seek_requested = False
         self.seek_position = 0
         
@@ -189,8 +190,9 @@ class StreamingVideoSync(VideoSync):
         
         # Start playback
         self.is_running = True
-        self.start_time = time.time()
-        self._emit_playback_state_changed(True)
+        if not self.start_paused:
+            self.start_time = time.time()
+        self._emit_playback_state_changed(not self.is_paused)
         
         # Start the decoding thread
         self.decode_thread = threading.Thread(target=self._decode_frames)
@@ -317,7 +319,9 @@ class StreamingVideoSync(VideoSync):
             if not self.frame_queue.empty():
                 frame, timestamp, frame_number = self.frame_queue.get(block=False)
                 if self.image_layer is not None:
+
                     self.image_layer.data = frame
+                    
                     self._emit_frame_changed(frame_number)
         except queue.Empty:
             pass
@@ -403,6 +407,18 @@ class StreamingVideoSync(VideoSync):
         self.is_running = False
         self.timer.stop()
         self._emit_playback_state_changed(False)
+        
+        # Disconnect napari events
+        try:
+            self.viewer.dims.events.current_step.disconnect(self._on_napari_step_change)
+        except:
+            pass
+        
+        # Clean up shortcuts
+        if hasattr(self, '_shortcuts'):
+            for shortcut in self._shortcuts:
+                shortcut.setEnabled(False)
+            self._shortcuts.clear()
         
         # Clean up video
         if self.video_container:

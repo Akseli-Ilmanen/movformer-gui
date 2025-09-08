@@ -2,7 +2,7 @@
 
 from napari import Viewer
 from qtpy.QtCore import Signal
-from qtpy.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 
 class NavigationWidget(QWidget):
@@ -33,13 +33,22 @@ class NavigationWidget(QWidget):
         self.next_button.setObjectName("next_button")
         self.next_button.clicked.connect(lambda: self._update_trial(1))
 
+        # Playback FPS control
+        self.fps_playback_edit = QLineEdit()
+        self.fps_playback_edit.setObjectName("fps_playback_edit")
+        self.fps_playback_edit.setText(str(app_state.get_with_default("fps_playback")))
+        self.fps_playback_edit.editingFinished.connect(self._on_fps_changed)
+        fps_label = QLabel("Playback FPS:")
+        fps_label.setObjectName("fps_label")
+
         # Sync mode selector with clear labels
         self.sync_toggle_btn = QComboBox()
         self.sync_toggle_btn.setObjectName("sync_toggle_btn")
         self.sync_toggle_btn.addItems(
             [
                 "Sync: Napari-Video → LinePlot (Follow Video)",
-                "Sync: LinePlot → Napari-Video (Interactive Plot)Sync: Napari-PyavStream → LinePlot (Follow Video)",
+                "Sync: LinePlot → Napari-Video (Interactive Plot)",
+                "Sync: Napari-PyavStream → LinePlot (Follow Video)",
             ]
         )
         self.sync_toggle_btn.currentIndexChanged.connect(self.toggle_sync)
@@ -54,12 +63,17 @@ class NavigationWidget(QWidget):
         row2.addWidget(self.next_button)
 
         row3 = QHBoxLayout()
-        row3.addWidget(self.sync_toggle_btn)
+        row3.addWidget(fps_label)
+        row3.addWidget(self.fps_playback_edit)
+
+        row4 = QHBoxLayout()
+        row4.addWidget(self.sync_toggle_btn)
 
         main_layout = QVBoxLayout()
         main_layout.addLayout(row1)
         main_layout.addLayout(row2)
         main_layout.addLayout(row3)
+        main_layout.addLayout(row4)
         self.setLayout(main_layout)
 
         # Initialize sync state from app_state
@@ -164,3 +178,13 @@ class NavigationWidget(QWidget):
             self.trials_combo.blockSignals(False)
 
             self._trial_change_consequences()
+
+    def _on_fps_changed(self):
+        """Handle playback FPS change from UI."""
+        fps_playback = float(self.fps_playback_edit.text())
+        self.app_state.fps_playback = fps_playback
+
+        # Update the playback settings in the viewer
+        qt_dims = self.viewer.window.qt_viewer.dims
+        slider_widget = qt_dims.slider_widgets[0]
+        slider_widget._update_play_settings(fps=fps_playback, loop_mode="once", frame_range=None)
