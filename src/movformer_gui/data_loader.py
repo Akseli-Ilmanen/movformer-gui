@@ -33,7 +33,7 @@ def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
         show_error(error_msg)
         return None, None
 
-    ds = xr.open_dataset(file_path)
+    ds = xr.open_dataset(file_path).load()
 
     # Check minimum required coordinates and variables
     required_coords = ['trials', 'time']

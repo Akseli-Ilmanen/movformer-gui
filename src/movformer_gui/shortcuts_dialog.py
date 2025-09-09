@@ -147,8 +147,6 @@ class ShortcutsDialog(QDialog):
             # Plot Navigation
             ("↑", "Plot Navigation", "Shift Y-axis range up by 5% of current range"),
             ("↓", "Plot Navigation", "Shift Y-axis range down by 5% of current range"),
-            ("←", "Plot Navigation", "Jump plot view left by configured jump size (in seconds)"),
-            ("→", "Plot Navigation", "Jump plot view right by configured jump size (in seconds)"),
             ("Shift+↑", "Plot Navigation", "Increase Y-axis upper and lower limits by 5% of current range (zoom out vertically)"),
             ("Shift+↓", "Plot Navigation", "Decrease Y-axis upper and lower limits by 5% of current range (zoom in vertically)"),
             ("Shift+←", "Plot Navigation", "Make window size 20% smaller (zoom in horizontally)"),

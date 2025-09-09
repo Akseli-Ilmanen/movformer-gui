@@ -5,6 +5,19 @@ import os
 import sys
 
 import napari
+import json
+
+# Load user_paths.json
+desktop_path = os.path.join(os.environ.get("USERPROFILE", os.environ.get("HOME")), "Desktop")
+with open(os.path.join(desktop_path, "user_paths.json"), "r") as f:
+    paths = json.load(f)
+    
+user = "Akseli"
+movformer_folder = paths[user].get("movformer_folder")
+
+sys.path.insert(0, movformer_folder)
+
+
 
 from movformer_gui.meta_widget import MetaWidget
 

@@ -117,12 +117,8 @@ class IntegratedLinePlot(QWidget):
             return
             
         current_time = self.app_state.current_frame / self.app_state.ds.fps
-        window_size = self.app_state.get_with_default('window_size')
         
-        # Calculate window bounds centered on current time
-        half_window = window_size / 2.0
-        x_min = current_time - half_window
-        x_max = current_time + half_window
+        self._update_window_size()
         
         # Apply y-axis limits from settings
         y_min = self.app_state.get_with_default('ymin')
@@ -130,9 +126,8 @@ class IntegratedLinePlot(QWidget):
         
         # Update view range without triggering signals
         if y_min is not None and y_max is not None:
-            self.vb.setRange(xRange=(x_min, x_max), yRange=(y_min, y_max), padding=0)
-        else:
-            self.vb.setRange(xRange=(x_min, x_max), padding=0)
+            self.vb.setRange(yRange=(y_min, y_max), padding=0)
+
 
         # Update time marker position and ensure visibility
         self.time_marker.setValue(current_time)
@@ -143,6 +138,25 @@ class IntegratedLinePlot(QWidget):
         
         # Store for reference
         self._last_window_center = current_time
+        
+        
+    def _update_window_size(self) -> None:
+        """Set window size by a multiplicative factor."""
+        if not hasattr(self.app_state, 'window_size'):
+            return
+
+        current_time = self.app_state.current_frame / self.app_state.ds.fps
+        window_size = self.app_state.get_with_default('window_size')
+        
+        # Calculate window bounds centered on current time
+        half_window = window_size / 2.0
+        x_min = current_time - half_window
+        x_max = current_time + half_window
+        
+        self.vb.setRange(xRange=(x_min, x_max), padding=0)
+            
+            
+            
         
     def _update_data_bounds(self):
         """Update data bounds from current dataset for zoom constraints."""
@@ -249,8 +263,7 @@ class IntegratedLinePlot(QWidget):
 
 
     def update_yrange(self, ymin: Optional[float], 
-                     ymax: Optional[float], 
-                     window_size: Optional[float]) -> None:
+                     ymax: Optional[float]) -> None:
         """Apply axis limits from state values."""
 
         
@@ -260,6 +273,8 @@ class IntegratedLinePlot(QWidget):
         # In interactive mode, apply y-range normally
         if ymin is not None and ymax is not None:
             self.plot_item.setYRange(ymin, ymax)
+    
+    
     
     def _handle_click(self, event) -> None:
         """Handle mouse clicks on plot."""
@@ -276,12 +291,3 @@ class IntegratedLinePlot(QWidget):
         self.plot_clicked.emit(click_info)
     
     
-    def get_current_xlim(self) -> Tuple[float, float]:
-        """Get current x-axis limits."""
-        x_range, _ = self.vb.viewRange()
-        return x_range
-    
-    def get_current_ylim(self) -> Tuple[float, float]:
-        """Get current y-axis limits."""
-        _, y_range = self.vb.viewRange()
-        return y_range

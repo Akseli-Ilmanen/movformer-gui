@@ -19,9 +19,23 @@ class AppStateSpec:
 
     # Variable name: (type, default, save_to_yaml, signal_type)
     VARS = {
+        # Video 
+        "current_frame": (int, 0, False, int),
+        "changes_saved": (bool, True, False, bool),
+        "num_frames": (int, 0, False, int),
+        "_info_data": (dict[str, Any], {}, False, object),
+        "sync_state": (str | None, None, False, object),        
+        "window_size": (float, 2.0, True, object),
+        "audio_buffer": (float | None, None, True, float),
+
+        # Data
         "ds": (xr.Dataset | None, None, False, object),
         "fps_playback": (float, 30.0, True, float),
         "trials": (list[int], [], False, object),
+        "trials_sel_condition_value": (str | None, None, True, object),
+        "plot_spectrogram": (bool, False, True, bool),
+        
+        # Paths
         "nc_file_path": (str | None, None, True, str),
         "video_folder": (str | None, None, True, str),
         "audio_folder": (str | None, None, True, str),
@@ -29,22 +43,15 @@ class AppStateSpec:
         "video_path": (str | None, None, True, str),
         "audio_path": (str | None, None, True, str),
         "tracking_path": (str | None, None, True, str),
-        "current_frame": (int, 0, False, int),  # PRIMARY source of truth
-        "num_frames": (int, 0, False, int),
-        "_info_data": (dict[str, Any], {}, False, object),
-        "sync_state": (str | None, None, False, object),
+         
+        # Plotting
         "ymin": (float | None, None, True, object),
         "ymax": (float | None, None, True, object),
         "spec_ymin": (float | None, None, True, object),
         "spec_ymax": (float | None, None, True, object),
-        "window_size": (float, 2.0, True, object),
-        "jump_size": (float, 0.2, True, object),
-        "audio_buffer": (float | None, None, True, float),
         "spec_buffer": (float | None, None, True, float),
         "video_buffer_size": (int, 300, True, int),
-        "plot_spectrogram": (bool, False, True, bool),
         "ready": (bool, False, False, bool),
-        "trials_sel_condition_value": (str | None, None, True, object),
         "nfft": (int, 1024, True, int),
         "hop_frac": (float, 0.5, True, float),
         "vmin_db": (float, -120.0, True, float),
@@ -78,7 +85,6 @@ class ObservableAppState(QObject):
     def __init__(self, yaml_path: str | None = None, auto_save_interval: int = 30000):
         super().__init__()
         object.__setattr__(self, "_state", AppState())
-        object.__setattr__(self, "_fps_cache", None)  # Cache for FPS value
 
         self.settings = get_settings()
         self._yaml_path = yaml_path or "gui_settings.yaml"
@@ -88,13 +94,7 @@ class ObservableAppState(QObject):
 
 
 
-    def _get_fps(self) -> float | None:
-        """Get FPS from dataset, with caching."""
-        if hasattr(self._state, "ds") and self._state.ds is not None:
-            if hasattr(self._state.ds, "fps"):
-                self._fps_cache = float(self._state.ds.fps)
-                return self._fps_cache
-        return self._fps_cache  # Return cached value if DS not available
+
 
     def get_with_default(self, key):
         """Return value from app state, or default from AppStateSpec if None."""
@@ -112,7 +112,6 @@ class ObservableAppState(QObject):
         # Handle special attributes that don't go through state
         if name in (
             "_state",
-            "_fps_cache",
             "settings",
             "_yaml_path",
             "_auto_save_timer",
@@ -131,10 +130,6 @@ class ObservableAppState(QObject):
             signal = getattr(self, f"{name}_changed", None)
             if signal and old_value != value:
                 signal.emit(value)
-
-            if name == "ds":
-                # Clear FPS cache when dataset changes
-                self._fps_cache = None
 
             return
 
@@ -175,11 +170,65 @@ class ObservableAppState(QObject):
             return
 
         attr_name = f"{type_key}_sel"
+        prev_attr_name = f"{type_key}_sel_previous"
         old_value = getattr(self, attr_name, None)
+        
+        # Store previous value if it exists and is different
+        if old_value is not None and old_value != currentValue and type_key in ["features", "keypoints", "individuals", "cameras", "mics"]:
+            setattr(self, prev_attr_name, old_value)
+        
         setattr(self, attr_name, currentValue)
 
         if old_value != currentValue:
             self.data_updated.emit()
+    
+    def toggle_key_sel(self, type_key, data_widget=None):
+        """Toggle between current and previous value for a given key."""
+        attr_name = f"{type_key}_sel"
+        prev_attr_name = f"{type_key}_sel_previous"
+        
+        current_value = getattr(self, attr_name, None)
+        previous_value = getattr(self, prev_attr_name, None)
+        
+        if previous_value is not None:
+            # Swap current and previous
+            setattr(self, attr_name, previous_value)
+            setattr(self, prev_attr_name, current_value)
+            
+            # Update UI combo box if data_widget is provided
+            if data_widget is not None:
+                self._update_combo_box(type_key, previous_value, data_widget)
+            
+            self.data_updated.emit()
+    
+    def _update_combo_box(self, type_key, new_value, data_widget):
+        """Update the corresponding combo box in the UI."""
+        try:
+            # Check IOWidget combos first, then DataWidget combos
+            combo = data_widget.io_widget.combos.get(type_key) or data_widget.combos.get(type_key)
+            
+            if combo is not None:
+                # Temporarily block signals to prevent triggering _on_combo_changed
+                combo.blockSignals(True)
+                combo.setCurrentText(str(new_value))
+                combo.blockSignals(False)
+                
+                # Manually trigger the combo change logic
+                self._trigger_combo_change_logic(type_key, data_widget)
+        except (AttributeError, TypeError) as e:
+            print(f"Error updating combo box for {type_key}: {e}")
+    
+    def _trigger_combo_change_logic(self, type_key, data_widget):
+        """Manually trigger the logic that would normally happen in _on_combo_changed."""
+        try:
+            if type_key in ["cameras", "mics"]:
+                data_widget.update_video_audio()
+            elif type_key == "tracking":
+                data_widget.update_tracking()
+            elif type_key in ["features", "individuals", "keypoints"]:
+                data_widget.update_plot()
+        except (AttributeError, TypeError) as e:
+            print(f"Error triggering combo change logic for {type_key}: {e}")
 
     # --- Save/Load methods ---
     def get_saveable_state_dict(self) -> dict:
@@ -198,7 +247,7 @@ class ObservableAppState(QObject):
 
         # Save dynamic _sel attributes
         for attr in dir(self):
-            if attr.endswith("_sel") and not attr.startswith("_"):
+            if attr.endswith("_sel") or attr.endswith("_sel_previous"):
                 try:
                     value = getattr(self, attr)
                     if not callable(value) and value is not None:

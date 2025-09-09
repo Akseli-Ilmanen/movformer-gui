@@ -50,6 +50,7 @@ class NavigationWidget(QWidget):
         )
         self.sync_toggle_btn.currentIndexChanged.connect(self.toggle_sync)
 
+
         # Layout
         row1 = QHBoxLayout()
         row1.addWidget(trial_label)
@@ -105,7 +106,6 @@ class NavigationWidget(QWidget):
         # Trigger video player switching by updating video/audio
         if self.data_widget and self.app_state.ready:
             self.data_widget.update_video_audio()
-            self.data_widget.update_plot()
 
 
 
@@ -169,7 +169,10 @@ class NavigationWidget(QWidget):
         fps_playback = float(self.fps_playback_edit.text())
         self.app_state.fps_playback = fps_playback
 
-        # Update the playback settings in the viewer
-        qt_dims = self.viewer.window.qt_viewer.dims
-        slider_widget = qt_dims.slider_widgets[0]
-        slider_widget._update_play_settings(fps=fps_playback, loop_mode="once", frame_range=None)
+        # Update the playback settings in the viewer if using napari mode
+        if getattr(self.app_state, 'sync_state', '') == 'napari_video_mode':
+            qt_dims = self.viewer.window.qt_viewer.dims
+            if qt_dims.slider_widgets:
+                slider_widget = qt_dims.slider_widgets[0]
+                slider_widget._update_play_settings(fps=fps_playback, loop_mode="once", frame_range=None)
+    

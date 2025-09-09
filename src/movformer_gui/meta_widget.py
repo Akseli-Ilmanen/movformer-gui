@@ -5,7 +5,7 @@ from pathlib import Path
 from napari.layers import Image
 from napari.viewer import Viewer
 from qt_niu.collapsible_widget import CollapsibleWidgetContainer
-from qtpy.QtWidgets import QApplication, QSizePolicy
+from qtpy.QtWidgets import QApplication, QSizePolicy, QMessageBox
 
 from .app_state import ObservableAppState
 from .data_widget import DataWidget
@@ -44,6 +44,15 @@ class MetaWidget(CollapsibleWidgetContainer):
         self.collapsible_widgets[1].expand()
 
         self._bind_global_shortcuts(self.labels_widget, self.data_widget)
+        
+        # Connect to napari window close event to check for unsaved changes
+        if hasattr(self.viewer, 'window') and hasattr(self.viewer.window, '_qt_window'):
+            original_close_event = self.viewer.window._qt_window.closeEvent
+            def napari_close_event(event):
+                if not self._check_unsaved_changes(event):
+                    return  
+                original_close_event(event)
+            self.viewer.window._qt_window.closeEvent = napari_close_event
 
     def _create_widgets(self):
         """Create all widgets with app_state passed to each one."""
@@ -161,8 +170,42 @@ class MetaWidget(CollapsibleWidgetContainer):
             widget_title="Navigation controls",
         )
 
+    def _check_unsaved_changes(self, event):
+        """Check for unsaved changes and prompt user. Returns True if OK to close, False if not."""
+        # Check for unsaved changes in labels widget
+        if not self.app_state.changes_saved:
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("Unsaved Changes")
+            msg_box.setText("You have unsaved changes to your labels.")
+            msg_box.setInformativeText("Would you like to save your changes before closing?")
+            msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+            msg_box.setDefaultButton(QMessageBox.Save)
+            
+            response = msg_box.exec_()
+            
+            if response == QMessageBox.Save:
+                # Attempt to save
+                try:
+                    self.labels_widget._save_updated_nc()
+                    # If save was successful, changes_saved will be True now
+                    return True  # OK to close
+                except Exception as e:
+                    error_msg = QMessageBox()
+                    error_msg.setWindowTitle("Save Error")
+                    error_msg.setText(f"Failed to save changes: {str(e)}")
+                    error_msg.exec_()
+                    event.ignore()  # Prevent closing
+                    return False  # Don't close
+            elif response == QMessageBox.Cancel:
+                event.ignore()  # Prevent closing
+                return False  # Don't close
+            # If Discard was selected, continue with closing
+        
+        return True  # OK to close
+    
     def closeEvent(self, event):
         """Handle close event by stopping auto-save and saving state one final time."""
+        # This method is now mainly for the dock widget itself, not the main napari window
         if hasattr(self, "app_state") and hasattr(self.app_state, "stop_auto_save"):
             self.app_state.stop_auto_save()
         super().closeEvent(event)
@@ -180,35 +223,52 @@ class MetaWidget(CollapsibleWidgetContainer):
 
     def _override_napari_shortcuts(self):
         """Aggressively unbind napari shortcuts at all levels."""
-        keys_to_override = [str(i) for i in range(10)]
+        
+        
+        number_keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+        qwerty_row = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
+        home_row = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';']
+        control_row = ['e', 'd', 'f', 'i', 'k', 'c', 'm', 't', 'n', 'p']
+        other = ['y', 'space', 'Right', 'Left']
 
-        from napari.layers import Labels, Points, Shapes, Surface, Tracks
-
+        all_keys = number_keys + qwerty_row + home_row + control_row + other
+        
+        from napari.layers import Labels, Points, Shapes, Surface, Tracks, Image
+        
         layer_types = [Image, Points, Shapes, Labels, Tracks, Surface]
+        
 
         for layer_type in layer_types:
-            for key in keys_to_override:
+            for key in all_keys:
                 try:
-                    layer_type.bind_key(key, None)
+                    if hasattr(layer_type, 'bind_key'):
+                        layer_type.bind_key(key, None)
                 except Exception as e:
                     print(f"Could not unbind {key} from {layer_type.__name__}: {e}")
 
-        for key in keys_to_override:
-            try:
+        for key in all_keys:
+            if hasattr(self.viewer, "keymap") and key in self.viewer.keymap:
+                del self.viewer.keymap[key]
+            
+            if hasattr(self.viewer, "_keymap") and key in self.viewer._keymap:
+                del self.viewer._keymap[key]
+                    
 
-                if hasattr(self.viewer, "keymap") and key in self.viewer.keymap:
-                    del self.viewer.keymap[key]
 
-                if hasattr(self.viewer, "_keymap") and key in self.viewer._keymap:
-                    del self.viewer._keymap[key]
-            except Exception as e:
-                print(f"Could not remove {key} from viewer keymap: {e}")
+        if self.viewer.layers.selection.active:
+            active_layer = self.viewer.layers.selection.active
+            for key in all_keys:
+                if hasattr(active_layer, 'keymap') and key in active_layer.keymap:
+                    del active_layer.keymap[key]
+
+
 
     def _bind_global_shortcuts(self, labels_widget, data_widget):
         """Bind all global shortcuts using napari's @viewer.bind_key syntax."""
 
         # Manually unbind previous keys.
         self._override_napari_shortcuts()
+        
 
         # TO ADD documentation for inbuild pyqgt graph shortcuts
         # Right click hold - pull left/right to adjust xlim, up/down to adjust ylim
@@ -220,95 +280,104 @@ class MetaWidget(CollapsibleWidgetContainer):
             self.data_widget.toggle_play_pause()
         
 
-        @viewer.bind_key("m", overwrite=True)
+        # Navigation shortcuts (avoiding conflicts with motif labeling)
+        @viewer.bind_key("Right", overwrite=True) 
         def next_trial(v):
             self.navigation_widget.next_trial()
 
-        @viewer.bind_key("n", overwrite=True)
+        @viewer.bind_key("Left", overwrite=True)
         def prev_trial(v):
             self.navigation_widget.prev_trial()
 
-        # Arrow key plot navigation
-        @viewer.bind_key("Up", overwrite=True)
-        def shift_yrange_up(v):
-            self.plots_widget._shift_yrange(0.05)  # Shift Y range up by 5%
+        def setup_keybindings_grid_layout(viewer, labels_widget):
+            """Setup using grid layout for motif activation"""
+            
+            # Row 1: 1-0 (Motifs 1-10)
+            number_keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+            
+            # Row 2: Q-P (Motifs 11-20)
+            qwerty_row = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
+            
+            # Row 3: A-; (Motifs 21-30)
+            home_row = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';']
+            
+            # Bind number keys for motifs 1-10
+            for i, key in enumerate(number_keys):
+                motif_id = i + 1 if key != '0' else 10
+                viewer.bind_key(key, lambda v, mk=motif_id: labels_widget.activate_motif(mk), overwrite=True)
+            
+            # Bind qwerty row for motifs 11-20
+            for i, key in enumerate(qwerty_row):
+                viewer.bind_key(key, lambda v, mk=i+11: labels_widget.activate_motif(mk), overwrite=True)
+            
+            # Bind home row for motifs 21-30
+            for i, key in enumerate(home_row):
+                viewer.bind_key(key, lambda v, mk=i+21: labels_widget.activate_motif(mk), overwrite=True)
+            
+            print("""
+            Motif Layout:
+            [ 1][ 2][ 3][ 4][ 5][ 6][ 7][ 8][ 9][10]  (1-0 keys)
+            [11][12][13][14][15][16][17][18][19][20]  (Q-P keys)  
+            [21][22][23][24][25][26][27][28][29][30]  (A-; keys)
+            
+            Control Functions (use Shift+key):
+            Y: Edit motif
+            Shift+D: Delete motif
+            Shift+F: Toggle features
+            Shift+I: Toggle individuals
+            Shift+K: Toggle keypoints
+            Shift+C: Toggle cameras
+            Shift+M: Toggle mics
+            Shift+T: Toggle tracking
+            """)
 
-        @viewer.bind_key("Down", overwrite=True)
-        def shift_yrange_down(v):
-            self.plots_widget._shift_yrange(-0.05)  # Shift Y range down by 5%
-
-        @viewer.bind_key("Shift-Up", overwrite=True)
-        def adjust_ylim_up(v):
-            self.plots_widget._adjust_ylim(0.05)  # Increase Y limits by 5%
-
-        @viewer.bind_key("Shift-Down", overwrite=True)
-        def adjust_ylim_down(v):
-            self.plots_widget._adjust_ylim(-0.05)  # Decrease Y limits by 5%
-
-        # @viewer.bind_key("Left", overwrite=True)
-        # def jump_plot_left(v):
-        #     self.plots_widget._jump_plot(-1)  # Jump left by configured jump size
-
-        # @viewer.bind_key("Right", overwrite=True)
-        # def jump_plot_right(v):
-        #     self.plots_widget._jump_plot(1)  # Jump right by configured jump size
-
-        @viewer.bind_key("Shift-Left", overwrite=True)
-        def adjust_window_smaller(v):
-            self.plots_widget._adjust_window_size(0.8)  # Make window 20% smaller
-
-        @viewer.bind_key("Shift-Right", overwrite=True)
-        def adjust_window_larger(v):
-            self.plots_widget._adjust_window_size(1.2)  # Make window 20% larger
-
-        # Motif labeling (0-9, q, w, r, t)
-        for key, motif_key in zip(
-            [
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "0",
-                "Q",
-                "W",
-                "R",
-                "T",
-            ],
-            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
-            strict=False,
-        ):
-
-            def make_label_func(mk):
-                def label_func(v):
-                    labels_widget.activate_motif(mk)
-
-                return label_func
-
-            self.viewer.bind_key(key, make_label_func(motif_key), overwrite=True)
-
-        # In native napari GUI, oen can use:
-        # - Ctr + Alt + P for play/pause the viewer
+        # Call the setup function
+        setup_keybindings_grid_layout(viewer, labels_widget)
 
         # Left click to label a motif (Press shortcut, then left-click, left-click)
         # Right click on a motif to play it
 
-        # Edit motif (E)
-        @viewer.bind_key("e", overwrite=True)
+        @viewer.bind_key("ctrl+e", overwrite=True)  
         def edit_motif(v):
             labels_widget._edit_motif()
 
-        # Delete motif (D)
-        @viewer.bind_key("d", overwrite=True)
+        # Delete motif (Ctrl+D)
+        @viewer.bind_key("ctrl+d", overwrite=True)  
         def delete_motif(v):
             labels_widget._delete_motif()
-            
-            
-            
+
+        # Toggle features selection (Ctrl+F)
+        @viewer.bind_key("ctrl+f", overwrite=True)  
+        def toggle_features(v):
+            self.app_state.toggle_key_sel("features", self.data_widget)
+
+        # Toggle individuals selection (Ctrl+I)
+        @viewer.bind_key("ctrl+i", overwrite=True) 
+        def toggle_individuals(v):
+            self.app_state.toggle_key_sel("individuals", self.data_widget)
+
+        # Toggle keypoints selection (Ctrl+K)
+        @viewer.bind_key("ctrl+k", overwrite=True)  
+        def toggle_keypoints(v):
+            self.app_state.toggle_key_sel("keypoints", self.data_widget)
+
+        # Toggle cameras selection (Ctrl+C)
+        @viewer.bind_key("ctrl+c", overwrite=True)  
+        def toggle_cameras(v):
+            self.app_state.toggle_key_sel("cameras", self.data_widget)
+
+        # Toggle mics selection (Ctrl+M)
+        @viewer.bind_key("ctrl+m", overwrite=True) 
+        def toggle_mics(v):
+            self.app_state.toggle_key_sel("mics", self.data_widget)
+
+        # Toggle tracking selection (Ctrl+T)
+        @viewer.bind_key("ctrl+t", overwrite=True)  
+        def toggle_tracking(v):
+            self.app_state.toggle_key_sel("tracking", self.data_widget)
+
+        
+
     def _set_compact_font(self, font_size: int = 8):
         """Apply compact font to this widget and all children."""
         from qtpy.QtGui import QFont

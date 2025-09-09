@@ -1,18 +1,21 @@
 """Widget for labeling segments in movement data."""
-
+import xarray as xr
 import threading
+import shutil
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-
 import numpy as np
 import pyqtgraph as pg
 from napari.viewer import Viewer
+from napari.utils.notifications import show_info
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QHBoxLayout,
     QHeaderView,
     QPushButton,
@@ -20,6 +23,7 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QMessageBox,
 )
 
 from movformer.features.changepoints import snap_to_nearest_changepoint
@@ -53,18 +57,28 @@ class LabelsWidget(QWidget):
         # Current motif selection for editing
         self.current_motif_pos: list[int] | None = None  # [start, end] idx of selected motif
         self.current_motif_id: int | None = None  # ID of currently selected motif
+        
+        # Edit mode state  
+        self.old_motif_pos: list[int] | None = None  # Original position when editing
+        self.old_motif_id: int | None = None  # Original ID when editing
+
 
         # UI components
         self.motifs_table = None
 
         self._setup_ui()
-        path = Path(__file__).parent.parent.parent / "mapping.txt"  # change location in the future
-        self.motif_mappings = load_motif_mapping(path)
+
+
+        self.motif_mappings = load_motif_mapping("mapping.txt") # HARD CODED FOR NOW
         self._populate_motifs_table()
 
         self._sync_disabled = False
         self._in_labeling_operation = False  # Add flag to prevent re-entrance
         self._operation_lock = threading.Lock()  # Thread-safe flag
+
+    def _mark_changes_unsaved(self):
+        """Mark that changes have been made and are not saved."""
+        self.app_state.changes_saved = False
 
     def set_lineplot(self, lineplot):
         """Set the lineplot reference and connect click handler."""
@@ -181,40 +195,71 @@ class LabelsWidget(QWidget):
     def _create_control_buttons(self):
         """Create control buttons for labeling operations."""
         self.controls_widget = QWidget()
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()
         self.controls_widget.setLayout(layout)
 
+        # First row - existing buttons
+        first_row = QWidget()
+        first_layout = QHBoxLayout()
+        first_row.setLayout(first_layout)
+
         # Delete button
-        self.delete_button = QPushButton("Delete (D)")
+        self.delete_button = QPushButton("Delete (Ctrl + D)")
         self.delete_button.clicked.connect(self._delete_motif)
-        layout.addWidget(self.delete_button)
+        first_layout.addWidget(self.delete_button)
 
         # Edit button
-        self.edit_button = QPushButton("Edit (E)")
+        self.edit_button = QPushButton("Edit (Ctrl + E)")
         self.edit_button.clicked.connect(self._edit_motif)
-        layout.addWidget(self.edit_button)
+        first_layout.addWidget(self.edit_button)
 
         # Play button
         self.play_button = QPushButton("Play (Right-click)")
         self.play_button.clicked.connect(self._play_segment)
-        layout.addWidget(self.play_button)
+        first_layout.addWidget(self.play_button)
 
-    # Centralized mapping between motif_id and shortcut key
-    MOTIF_ID_TO_KEY = {
-        10: "0",
-        11: "Q",
-        12: "W",
-        13: "R",
-        14: "T",
-    }
+        # Second row - save controls
+        second_row = QWidget()
+        second_layout = QHBoxLayout()
+        second_row.setLayout(second_layout)
+
+        # Save button
+        self.save_button = QPushButton("Save updated .nc")
+        self.save_button.clicked.connect(self._save_updated_nc)
+        second_layout.addWidget(self.save_button)
+
+        # Timestamp versions checkbox
+        self.timestamp_checkbox = QCheckBox("Timestamp versions")
+        self.timestamp_checkbox.setChecked(True)  # Default to enabled
+        second_layout.addWidget(self.timestamp_checkbox)
+
+        layout.addWidget(first_row)
+        layout.addWidget(second_row)
+
+    MOTIF_ID_TO_KEY = {}
+
+    # Row 1: 1-0 (Motifs 1-10)
+    number_keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+    for i, key in enumerate(number_keys):
+        motif_id = i + 1 if key != '0' else 10
+        MOTIF_ID_TO_KEY[motif_id] = key
+
+    # Row 2: Q-P (Motifs 11-20)
+    qwerty_row = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
+    for i, key in enumerate(qwerty_row):
+        motif_id = i + 11
+        MOTIF_ID_TO_KEY[motif_id] = key.upper()  # Display as uppercase for clarity
+
+    # Row 3: A-; (Motifs 21-30)
+    home_row = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';']
+    for i, key in enumerate(home_row):
+        motif_id = i + 21
+        MOTIF_ID_TO_KEY[motif_id] = key.upper() if key != ';' else ';'  # Keep ; as is
+
     # Also provide reverse mapping for key to motif_id
     KEY_TO_MOTIF_ID = {v.lower(): k for k, v in MOTIF_ID_TO_KEY.items()}
-    # Add numeric keys for motif_id 0-9
-    for i in range(10):
-        KEY_TO_MOTIF_ID[str(i)] = i
-        MOTIF_ID_TO_KEY[i] = str(i)
-
-    def _populate_motifs_table(self):
+    
+    def _populate_motifs_table(self):    
         """Populate the motifs table with loaded mappings."""
         self.motifs_table.setRowCount(len(self.motif_mappings))
         for row, (motif_id, data) in enumerate(self.motif_mappings.items()):
@@ -323,7 +368,7 @@ class LabelsWidget(QWidget):
         ds_kwargs = self.app_state.get_ds_kwargs()
         labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
-        from qtpy.QtCore import Qt
+
 
         if button == Qt.LeftButton and not self.ready_for_click:
             # Select motif -> Then can delete or edit
@@ -348,6 +393,9 @@ class LabelsWidget(QWidget):
                 # Second click - store position and automatically apply
                 self.second_click = x_snapped
                 self._apply_motif()  # Automatically apply after two clicks
+
+
+
 
     def _check_motif_click(self, x_clicked: float, labels: np.ndarray) -> bool:
         """Check if the click is on an existing motif and select it if so. Move left and right until you find its start and stop idxs."""
@@ -393,7 +441,6 @@ class LabelsWidget(QWidget):
             if self.first_click is None or self.second_click is None:
                 return
 
-        
             ds_kwargs = self.app_state.get_ds_kwargs()
             labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
@@ -403,6 +450,19 @@ class LabelsWidget(QWidget):
             # Handle overlapping labels (as in MATLAB code)
             if labels[end_idx] != 0:
                 end_idx = end_idx - 1
+
+            # Check if we're in edit mode
+            if hasattr(self, 'old_motif_pos') and self.old_motif_pos is not None:
+                # Edit mode: clear old motif first
+                old_start, old_end = self.old_motif_pos
+                labels[old_start : old_end + 1] = 0
+                print(f"Editing motif {self.old_motif_id}: moved from {old_start}-{old_end} to {start_idx}-{end_idx}")
+                
+                # Clean up edit mode variables
+                self.old_motif_pos = None
+                self.old_motif_id = None
+                self.current_motif_pos = None
+                self.current_motif_id = None
 
             # Apply the new label
             labels[start_idx : end_idx + 1] = self.selected_motif_id
@@ -414,6 +474,9 @@ class LabelsWidget(QWidget):
 
             # Save updated labels back to dataset
             self.app_state.ds["labels"].loc[filt_kwargs] = labels
+            
+            # Mark changes as unsaved
+            self._mark_changes_unsaved()
 
    
             time_data = self.app_state.ds.time.values
@@ -442,6 +505,9 @@ class LabelsWidget(QWidget):
 
             # Save updated labels back to dataset
             self.app_state.ds["labels"].loc[filt_kwargs] = labels
+            
+            # Mark changes as unsaved
+            self._mark_changes_unsaved()
 
     
             time_data = self.app_state.ds.time.values
@@ -449,32 +515,21 @@ class LabelsWidget(QWidget):
 
     def _edit_motif(self):
         """Enter edit mode for adjusting motif boundaries."""
-        with self._disable_sync_during_labeling():
-            if self.current_motif_pos is None or self.first_click is None or self.second_click is None:
-                return
+        if self.current_motif_pos is None:
+            print("No motif selected. Right-click on a motif first to select it.")
+            return
 
-            old_start, old_end = self.current_motif_pos
-
-       
-            ds_kwargs = self.app_state.get_ds_kwargs()
-            labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
-
-    
-            labels[old_start : old_end + 1] = 0
-
-            new_start, new_end = self.first_click, self.second_click
-            labels[new_start : new_end + 1] = self.selected_motif_id
-
-
-            self.current_motif_pos = None
-            self.current_motif_id = None
-
-            # Save updated labels back to dataset
-            self.app_state.ds["labels"].loc[filt_kwargs] = labels
-
-
-            time_data = self.app_state.ds.time.values
-            self.plot_all_motifs(time_data, labels)
+        # Store the old motif info for later cleanup
+        self.old_motif_pos = self.current_motif_pos.copy()
+        self.old_motif_id = self.current_motif_id
+        
+        # Enter editing mode - user needs to click twice to set new boundaries
+        self.ready_for_click = True
+        self.first_click = None
+        self.second_click = None
+        
+        print(f"Edit mode: Click twice to set new boundaries for motif {self.current_motif_id}")
+        return
 
     def _play_segment(self):
 
@@ -490,3 +545,37 @@ class LabelsWidget(QWidget):
             end_frame = self.current_motif_pos[1]
 
             self.app_state.sync_manager.play_segment(start_frame, end_frame)
+
+    def _save_updated_nc(self):
+        """Save the updated NetCDF file with optional timestamp versioning."""
+        if not hasattr(self.app_state, 'nc_file_path'):
+            raise ValueError("No NetCDF file path specified in app_state.")
+
+        nc_path = Path(self.app_state.nc_file_path)
+        ds = self.app_state.ds
+        
+        # Close to allow being overwritten
+        ds.close()       
+        ds.to_netcdf(nc_path, mode='w')
+      
+        if self.timestamp_checkbox.isChecked():
+            versions_dir = nc_path.parent / "versions"
+            versions_dir.mkdir(exist_ok=True)
+            
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            versioned_filename = f"{nc_path.stem}_{timestamp}{nc_path.suffix}"
+            versioned_path = versions_dir / versioned_filename
+            
+
+            if nc_path.exists():
+                shutil.copy2(nc_path, versioned_path)
+        
+
+    
+        self.app_state.ds = xr.open_dataset(nc_path)
+        
+        # Mark changes as saved after successful save
+        self.app_state.changes_saved = True
+
+        show_info(f"✅ File saved successfully: {nc_path.name}")

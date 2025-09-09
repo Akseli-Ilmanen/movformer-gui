@@ -1,4 +1,4 @@
-src/ignore/*
+# src/ignore/*
 movformer/*
 
 # Byte-compiled / optimized / DLL files

@@ -77,8 +77,91 @@ class DataWidget(DataLoader, QWidget):
         self.labels_widget = labels_widget
         self.plots_widget = plots_widget
         self.navigation_widget = navigation_widget
+        
+        # Store lineplot reference in app_state for video sync access
+        self.app_state.lineplot_widget = lineplot
 
-
+    def get_video_slider_widget(self):
+        """Get the video slider widget if using PyAV stream mode."""
+        if (self.sync_manager and 
+            hasattr(self.sync_manager, 'get_slider_widget') and
+            getattr(self.app_state, 'sync_state', '') == 'pyav_stream_mode'):
+            return self.sync_manager.get_slider_widget()
+        return None
+    
+    def _add_video_slider_to_viewer(self):
+        """Add video slider widget to napari's dimension control area."""
+        if (self.sync_manager and 
+            hasattr(self.sync_manager, 'get_slider_widget') and
+            getattr(self.app_state, 'sync_state', '') == 'pyav_stream_mode'):
+            
+            slider_widget = self.sync_manager.get_slider_widget()
+            if slider_widget:
+                try:
+                    # Remove any existing video slider
+                    self._remove_video_slider_from_viewer()
+                    
+                    # Access napari's Qt viewer and dimension controls area
+                    qt_viewer = self.viewer.window._qt_viewer
+                    
+                    # Get the QtDims widget (napari's dimension slider container)
+                    qt_dims = qt_viewer.dims
+                    
+                    # Add our video slider to the same layout where napari shows dimension sliders
+                    # This integrates it directly into napari's native slider area
+                    dims_layout = qt_dims.layout()
+                    if dims_layout:
+                        # Insert at the top of the dims layout to appear above any existing sliders
+                        dims_layout.insertWidget(0, slider_widget)
+                        
+                        # Style to match napari's dimension sliders
+                        slider_widget.setMinimumHeight(22)  # Match napari's SLIDERHEIGHT
+                        slider_widget.setMaximumHeight(30)
+                        slider_widget.setContentsMargins(0, 0, 0, 0)
+                        
+                        # Store reference for cleanup
+                        self._video_slider_widget = slider_widget
+                        self._qt_dims_layout = dims_layout
+                        
+                        # Show the dims widget if it was hidden
+                        qt_dims.setVisible(True)
+                        qt_dims.show()
+                        
+                except Exception as e:
+                    print(f"Error adding video slider to napari dims area: {e}")
+                    # Fallback to dock widget approach
+                    self._add_video_slider_as_dock(slider_widget)
+    
+    def _add_video_slider_as_dock(self, slider_widget):
+        """Fallback method to add slider as dock widget if direct integration fails."""
+        try:
+            self._video_slider_dock = self.viewer.window.add_dock_widget(
+                slider_widget, 
+                area="bottom", 
+                name="Video Controls"
+            )
+            slider_widget.setMinimumHeight(40)
+            slider_widget.setMaximumHeight(60)
+        except Exception as e:
+            print(f"Error adding video slider as dock: {e}")
+    
+    def _remove_video_slider_from_viewer(self):
+        """Remove video slider widget from napari's interface."""
+        try:
+            # Remove from QtDims layout if integrated there
+            if hasattr(self, '_video_slider_widget') and hasattr(self, '_qt_dims_layout'):
+                self._qt_dims_layout.removeWidget(self._video_slider_widget)
+                self._video_slider_widget.setParent(None)
+                delattr(self, '_video_slider_widget')
+                delattr(self, '_qt_dims_layout')
+            
+            # Remove dock widget if used as fallback
+            if hasattr(self, '_video_slider_dock'):
+                self.viewer.window.remove_dock_widget(self._video_slider_dock)
+                delattr(self, '_video_slider_dock')
+                
+        except Exception as e:
+            print(f"Error removing video slider from viewer: {e}")
 
     def on_load_clicked(self):
         """Load the file and show line plot in napari dock."""
@@ -367,6 +450,9 @@ class DataWidget(DataLoader, QWidget):
         if self.sync_manager:
             self.sync_manager.stop()
             self.sync_manager = None
+            
+        # Remove any existing video slider
+        self._remove_video_slider_from_viewer()
 
    
         video_file = self.app_state.ds[self.app_state.cameras_sel].sel(trials=self.app_state.trials_sel).values.item()
@@ -401,12 +487,14 @@ class DataWidget(DataLoader, QWidget):
                 video_source=self.app_state.video_path,
                 audio_source=self.app_state.audio_path
             )
-    
+
+            self.app_state.current_frame = current_frame
             self.sync_manager.start()
             self.sync_manager.pause()
-
-            if current_frame > 0:
-                self.sync_manager.seek_to_frame(current_frame)
+            self.sync_manager.seek_to_frame(current_frame)
+                
+            # Add video slider to viewer window
+            self._add_video_slider_to_viewer()
             
         else:
             # Use accurate napari player (NapariVideoSync) for napari_video_mode
@@ -425,9 +513,7 @@ class DataWidget(DataLoader, QWidget):
                 audio_source=self.app_state.audio_path
             )
             
-     
-            if current_frame > 0:
-                self.sync_manager.seek_to_frame(current_frame)
+            self.sync_manager.seek_to_frame(current_frame)
 
         # Connect playback state changes to sync mode control
         # Connect playback state changes to sync mode control, passing is_playing as argument

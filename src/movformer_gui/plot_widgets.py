@@ -13,7 +13,6 @@ class PlotsWidget(QWidget):
       - ymin, ymax
       - spec_ymin, spec_ymax
       - window_size
-      - jump_size
       - audio_buffer
       - spec_buffer
     """
@@ -42,7 +41,6 @@ class PlotsWidget(QWidget):
         self.spec_ymin_edit = QLineEdit()
         self.spec_ymax_edit = QLineEdit()
         self.window_s_edit = QLineEdit()
-        self.jump_size_edit = QLineEdit()
         self.audio_buffer_edit = QLineEdit()
         self.spec_buffer_edit = QLineEdit()
 
@@ -59,11 +57,6 @@ class PlotsWidget(QWidget):
         layout.addWidget(QLabel("Y max (spectrogram):"), 1, 2)
         layout.addWidget(self.spec_ymax_edit, 1, 3)
         
-        # Row 2: Window size / Jump size
-        layout.addWidget(QLabel("Window size (s):"), 2, 0)
-        layout.addWidget(self.window_s_edit, 2, 1)
-        layout.addWidget(QLabel("Jump size (s)*:"), 2, 2)
-        layout.addWidget(self.jump_size_edit, 2, 3)
         
         # Row 3: Audio buffer / Spectrogram buffer
         layout.addWidget(QLabel("Audio buffer (s):"), 3, 0)
@@ -71,10 +64,6 @@ class PlotsWidget(QWidget):
         layout.addWidget(QLabel("Spectrogram buffer (x):"), 3, 2)
         layout.addWidget(self.spec_buffer_edit, 3, 3)
         
-        # Note about jump size
-        self.jump_note_label = QLabel("*Jump size only works in Napari Video mode")
-        self.jump_note_label.setStyleSheet("font-size: 9pt; color: #888;")
-        main_layout.addWidget(self.jump_note_label)
 
         # Connect edit signals
         self.ymin_edit.editingFinished.connect(self._on_edited)
@@ -82,7 +71,6 @@ class PlotsWidget(QWidget):
         self.spec_ymin_edit.editingFinished.connect(self._on_edited)
         self.spec_ymax_edit.editingFinished.connect(self._on_edited)
         self.window_s_edit.editingFinished.connect(self._on_edited)
-        self.jump_size_edit.editingFinished.connect(self._on_edited)
         self.audio_buffer_edit.editingFinished.connect(self._on_edited)
         self.spec_buffer_edit.editingFinished.connect(self._on_edited)
 
@@ -105,7 +93,6 @@ class PlotsWidget(QWidget):
             ("spec_ymin", self.spec_ymin_edit),
             ("spec_ymax", self.spec_ymax_edit),
             ("window_size", self.window_s_edit),
-            ("jump_size", self.jump_size_edit),
             ("audio_buffer", self.audio_buffer_edit),
             ("spec_buffer", self.spec_buffer_edit)
         ]:
@@ -133,7 +120,6 @@ class PlotsWidget(QWidget):
             "spec_ymin": self.spec_ymin_edit,
             "spec_ymax": self.spec_ymax_edit,
             "window_size": self.window_s_edit,
-            "jump_size": self.jump_size_edit,
             "audio_buffer": self.audio_buffer_edit,
             "spec_buffer": self.spec_buffer_edit
         }
@@ -162,14 +148,15 @@ class PlotsWidget(QWidget):
                     self.lineplot.update_yrange(
                         values["spec_ymin"], 
                         values["spec_ymax"], 
-                        values["window_size"]
                     )
                 else:
                     self.lineplot.update_yrange(
                         values["ymin"], 
                         values["ymax"], 
-                        values["window_size"]
                     )
+                    
+                self.lineplot._update_window_size()
+                    
 
     def _reset_to_defaults(self):
         """Reset all plot values to defaults."""
@@ -179,7 +166,6 @@ class PlotsWidget(QWidget):
             ("spec_ymin", self.spec_ymin_edit),
             ("spec_ymax", self.spec_ymax_edit),
             ("window_size", self.window_s_edit),
-            ("jump_size", self.jump_size_edit),
             ("audio_buffer", self.audio_buffer_edit),
             ("spec_buffer", self.spec_buffer_edit)
         ]:
@@ -197,42 +183,3 @@ class PlotsWidget(QWidget):
         return getattr(self.app_state, 'sync_state', '') == 'napari_video_mode'
 
     
-    def _adjust_window_size(self, factor: float):
-        """Adjust window_size by a multiplicative factor and update relevant fields."""
-        if not self._check_interactive_mode():
-            return
-        current = self._parse_float(self.window_s_edit.text())
-        if current is None:
-            current = self.app_state.get_with_default("window_size")
-
-        new_value = current * factor
-        self.window_s_edit.setText(str(new_value))
-        setattr(self.app_state, "window_size", new_value)
-
-
-
-    def _adjust_ylim(self, factor: float):
-        """Adjust y-axis limits (zoom in/out)."""
-        if not self._check_interactive_mode() or not self.lineplot:
-            return
-            
-        vb = self.lineplot.plot_item.vb
-        ymin, ymax = vb.viewRange()[1]
-        center = (ymin + ymax) / 2
-        new_range = (ymax - ymin) * (1 + factor)
-        vb.setYRange(center - new_range/2, center + new_range/2)
-
-    def _shift_yrange(self, factor: float):
-        """Shift y-axis range up/down."""
-        if not self._check_interactive_mode() or not self.lineplot:
-            return
-            
-        vb = self.lineplot.plot_item.vb
-        ymin, ymax = vb.viewRange()[1]
-        shift = (ymax - ymin) * factor
-        vb.setYRange(ymin + shift, ymax + shift)
-
-    def _jump_plot(self, direction: int):
-        """Jump plot view horizontally."""
-        if not self._check_interactive_mode() or not self.lineplot:
-            return
