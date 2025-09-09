@@ -96,9 +96,9 @@ class DataWidget(DataLoader, QWidget):
 
         self._set_controls_enabled(True)
 
-        self._update_plot()
-        self._update_video_audio()
-        self._update_tracking()
+        self.update_plot()
+        self.update_video_audio()
+        self.update_tracking()
 
         load_btn = self.io_widget.load_button
         load_btn.setEnabled(False)
@@ -209,11 +209,11 @@ class DataWidget(DataLoader, QWidget):
             self.app_state.set_key_sel(key, combo.currentText())
 
             if key in ["cameras", "mics"]:
-                self._update_video_audio()
+                self.update_video_audio()
             elif key == "tracking":
-                self._update_tracking()
+                self.update_tracking()
             elif key in ["features", "colors", "individuals", "keypoints"]:
-                self._update_plot()
+                self.update_plot()
             elif key == "trial_conditions":
                 self._update_trial_condition_values()
 
@@ -328,9 +328,9 @@ class DataWidget(DataLoader, QWidget):
                 self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials_sel))
 
         self.navigation_widget.trials_combo.blockSignals(False)
-        self._update_plot()
+        self.update_plot()
 
-    def _update_plot(self):
+    def update_plot(self):
         """Update the line plot with current trial/keypoint/variable selection."""
         if not self.app_state.ready:
             return
@@ -350,22 +350,25 @@ class DataWidget(DataLoader, QWidget):
         except (KeyError, AttributeError, ValueError) as e:
             show_error(f"Error updating plot: {e}")
 
-    def _update_video_audio(self):
+    def update_video_audio(self):
         """Update video and audio using appropriate sync manager based on sync_state."""
         if not self.app_state.ready or not self.app_state.video_folder:
             return
 
-        # Remove all previous video layers
+        # Store current frame to preserve position when switching sync modes
+        current_frame = getattr(self.app_state, 'current_frame', 0)
+
+
         for layer in list(self.viewer.layers):
-            if layer.name == "video":
+            if layer.name in ["video", "Video Stream"]:
                 self.viewer.layers.remove(layer)
 
-        # Stop existing sync manager
+
         if self.sync_manager:
             self.sync_manager.stop()
             self.sync_manager = None
 
-        # Get video file path from dataset
+   
         video_file = self.app_state.ds[self.app_state.cameras_sel].sel(trials=self.app_state.trials_sel).values.item()
 
         video_path = os.path.join(self.app_state.video_folder, video_file)
@@ -383,18 +386,14 @@ class DataWidget(DataLoader, QWidget):
             except (KeyError, AttributeError):
                 self.app_state.audio_path = None
 
-        # Store current frame to preserve position when switching sync modes
-        current_frame = getattr(self.app_state, 'current_frame', 0)
+
         
-        # Choose video player based on sync_state
-        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
+ 
+        sync_state = getattr(self.app_state, 'sync_state', 'napari_video_mode')
         
-        if sync_state == 'pyav_to_lineplot':
+        if sync_state == 'pyav_stream_mode':
             # Use fast streaming player (StreamingVideoSync)
-            # Remove any existing video layers since streaming player creates its own
-            for layer in list(self.viewer.layers):
-                if layer.name in ["video", "Video Stream"]:
-                    self.viewer.layers.remove(layer)
+
                     
             self.sync_manager = StreamingVideoSync(
                 viewer=self.viewer,
@@ -402,20 +401,16 @@ class DataWidget(DataLoader, QWidget):
                 video_source=self.app_state.video_path,
                 audio_source=self.app_state.audio_path
             )
-            # Start streaming for pyav player
+    
             self.sync_manager.start()
             self.sync_manager.pause()
-            
-            # Seek to current frame to preserve position
+
             if current_frame > 0:
                 self.sync_manager.seek_to_frame(current_frame)
             
         else:
-            # Use accurate napari player (NapariVideoSync) for video_to_lineplot and lineplot_to_video
-            # Remove any existing video layers
-            for layer in list(self.viewer.layers):
-                if layer.name in ["video", "Video Stream"]:
-                    self.viewer.layers.remove(layer)
+            # Use accurate napari player (NapariVideoSync) for napari_video_mode
+
                     
             # Load video using napari-video plugin
             self.viewer.open(self.app_state.video_path, name="video", plugin="napari_video")
@@ -430,16 +425,32 @@ class DataWidget(DataLoader, QWidget):
                 audio_source=self.app_state.audio_path
             )
             
-            # Seek to current frame to preserve position
+     
             if current_frame > 0:
                 self.sync_manager.seek_to_frame(current_frame)
 
+        # Connect playback state changes to sync mode control
+        # Connect playback state changes to sync mode control, passing is_playing as argument
+        self.sync_manager.playback_state_changed.connect(self.set_sync_mode)
+        
+
         # Connect sync manager frame changes to app state and lineplot
         self.sync_manager.frame_changed.connect(self._on_sync_frame_changed)
-        
-        # Store reference in app_state for compatibility with other widgets
+
+        # Indirectly give other widgets acess to sync manager via app state
         self.app_state.sync_manager = self.sync_manager
 
+
+
+    def set_sync_mode(self, is_playing: bool) -> None:
+        """Public method to set sync mode based on playback state."""
+
+        if is_playing:
+            self.lineplot.set_video_sync_mode()
+        elif not is_playing and self.app_state.sync_state == "napari_video_mode":
+            self.lineplot.set_dynamic_mode()
+            
+        
     def _on_sync_frame_changed(self, frame_number: int):
         """Handle frame changes from sync manager."""
         self.app_state.current_frame = frame_number
@@ -449,10 +460,10 @@ class DataWidget(DataLoader, QWidget):
 
 
 
-    def _update_tracking(self):
+    def update_tracking(self):
         if not self.app_state.tracking_folder:
             return
-
+ 
         # Remove all previous layers with name "video"
         for layer in list(self.viewer.layers):
             if self.file_name and layer.name in [
@@ -502,4 +513,4 @@ class DataWidget(DataLoader, QWidget):
         """Handle spectrogram checkbox state change."""
         self.app_state.plot_spectrogram = bool(self.plot_spec_checkbox.isChecked())
 
-        self._update_plot()
+        self.update_plot()

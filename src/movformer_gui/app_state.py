@@ -32,7 +32,7 @@ class AppStateSpec:
         "current_frame": (int, 0, False, int),  # PRIMARY source of truth
         "num_frames": (int, 0, False, int),
         "_info_data": (dict[str, Any], {}, False, object),
-        "sync_state": (str | None, None, True, object),
+        "sync_state": (str | None, None, False, object),
         "ymin": (float | None, None, True, object),
         "ymax": (float | None, None, True, object),
         "spec_ymin": (float | None, None, True, object),
@@ -52,6 +52,7 @@ class AppStateSpec:
         "buffer_multiplier": (float, 5.0, True, float),
         "recompute_threshold": (float, 0.5, True, float),
         "cmap": (str, "magma", True, str),
+        
     }
 
 
@@ -72,7 +73,7 @@ class ObservableAppState(QObject):
         locals()[f"{var}_changed"] = Signal(signal_type)
 
     data_updated = Signal()
-    sync_state_changed = Signal(str)  # Signal for sync mode changes
+
 
     def __init__(self, yaml_path: str | None = None, auto_save_interval: int = 30000):
         super().__init__()
@@ -85,8 +86,7 @@ class ObservableAppState(QObject):
         self._auto_save_timer.timeout.connect(self.save_to_yaml)
         self._auto_save_timer.start(auto_save_interval)
 
-        self.lineplot = None
-        # Reference to sync manager (replaces old stream)
+
 
     def _get_fps(self) -> float | None:
         """Get FPS from dataset, with caching."""
@@ -135,15 +135,6 @@ class ObservableAppState(QObject):
             if name == "ds":
                 # Clear FPS cache when dataset changes
                 self._fps_cache = None
-
-            elif name == "sync_state":
-                # Update lineplot mode when sync state changes
-                if self.lineplot is not None:
-                    self.lineplot.set_sync_mode(value)
-
-                # Emit special sync state signal
-                if old_value != value:
-                    self.sync_state_changed.emit(value)
 
             return
 

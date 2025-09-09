@@ -357,19 +357,17 @@ class LabelsWidget(QWidget):
         motif_id = int(labels[frame_idx])
 
         if motif_id != 0:
-            # Find the start and end of this motif
             motif_start = frame_idx
             motif_end = frame_idx
 
-            # Find start
+       
             while motif_start > 0 and labels[motif_start - 1] == motif_id:
                 motif_start -= 1
 
-            # Find end
+   
             while motif_end < len(labels) - 1 and labels[motif_end + 1] == motif_id:
                 motif_end += 1
 
-            # Select this motif
             self.current_motif_id = motif_id
             self.current_motif_pos = [motif_start, motif_end]
             self.selected_motif_id = motif_id
@@ -395,7 +393,7 @@ class LabelsWidget(QWidget):
             if self.first_click is None or self.second_click is None:
                 return
 
-            # Get current labels from app_state
+        
             ds_kwargs = self.app_state.get_ds_kwargs()
             labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
@@ -417,7 +415,7 @@ class LabelsWidget(QWidget):
             # Save updated labels back to dataset
             self.app_state.ds["labels"].loc[filt_kwargs] = labels
 
-            # Update plot
+   
             time_data = self.app_state.ds.time.values
             self.plot_all_motifs(time_data, labels)
 
@@ -428,7 +426,7 @@ class LabelsWidget(QWidget):
 
             start, end = self.current_motif_pos
 
-            # Get current labels from app_state
+    
             ds_kwargs = self.app_state.get_ds_kwargs()
 
 
@@ -438,14 +436,14 @@ class LabelsWidget(QWidget):
             # Clear labels in the selected range (set to 0)
             labels[start : end + 1] = 0
 
-            # Clear selection
+
             self.current_motif_pos = None
             self.current_motif_id = None
 
             # Save updated labels back to dataset
             self.app_state.ds["labels"].loc[filt_kwargs] = labels
 
-            # Update plot
+    
             time_data = self.app_state.ds.time.values
             self.plot_all_motifs(time_data, labels)
 
@@ -457,36 +455,35 @@ class LabelsWidget(QWidget):
 
             old_start, old_end = self.current_motif_pos
 
-            # Get current labels from app_state
+       
             ds_kwargs = self.app_state.get_ds_kwargs()
             labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
-            # Clear labels in the selected range (set to 0)
+    
             labels[old_start : old_end + 1] = 0
 
             new_start, new_end = self.first_click, self.second_click
             labels[new_start : new_end + 1] = self.selected_motif_id
 
-            # Clear current selection
+
             self.current_motif_pos = None
             self.current_motif_id = None
 
-            # Save updated labels back t3o dataset
+            # Save updated labels back to dataset
             self.app_state.ds["labels"].loc[filt_kwargs] = labels
 
-            # Update plot
+
             time_data = self.app_state.ds.time.values
             self.plot_all_motifs(time_data, labels)
 
     def _play_segment(self):
 
-        if not self.app_state.sync_state == "lineplot_to_video":
+        if not self.app_state.sync_state == "napari_video_mode":
             return
 
         if not self.current_motif_id or len(self.current_motif_pos) != 2:
             return
 
-        # Use new sync manager instead of old stream
         if hasattr(self.app_state, "sync_manager") and self.app_state.sync_manager:
 
             start_frame = self.current_motif_pos[0]

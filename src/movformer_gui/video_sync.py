@@ -35,7 +35,6 @@ class VideoSync(QObject):
         
         # Common state
         self.current_frame = 0
-        self.current_time = 0.0
         self.total_frames = 0
         self.total_duration = 0.0
         self.fps = app_state.ds.fps
@@ -93,13 +92,13 @@ class VideoSync(QObject):
     def _emit_frame_changed(self, frame_number: int):
         """Emit frame changed signal and update internal state."""
         self.current_frame = frame_number
-        self.current_time = frame_number / self.fps
         self.app_state.current_frame = frame_number
         self.frame_changed.emit(frame_number)
     
     def _emit_playback_state_changed(self, is_playing: bool):
         """Emit playback state changed signal."""
         self.playback_state_changed.emit(is_playing)
+        
 
 
 class StreamingVideoSync(VideoSync):
@@ -193,7 +192,9 @@ class StreamingVideoSync(VideoSync):
         self._initialize_audio()
         
         # Get first frame to initialize the layer
-        first_frame = self._get_frame_at_position(0)
+        sample_frame = getattr(self.app_state, 'current_frame', None)
+        sample_time = sample_frame / self.fps if sample_frame else 0.0
+        first_frame = self._get_frame_at_position(sample_time)
         if first_frame is not None:
             self.image_layer = self.viewer.add_image(
                 first_frame,
@@ -221,6 +222,9 @@ class StreamingVideoSync(VideoSync):
     
     def _get_frame_at_position(self, position_seconds: float):
         """Get a single frame at specific position"""
+        
+        
+        
         seek_target = int(position_seconds / self.video_stream.time_base)
         self.video_container.seek(seek_target, stream=self.video_stream)
         
@@ -241,7 +245,6 @@ class StreamingVideoSync(VideoSync):
                     self.video_container.seek(seek_target, stream=self.video_stream, any_frame=False, backward=True)
                     
                     # Update timing
-                    self.current_time = self.seek_position
                     self.start_time = time.time() - self.seek_position
                     self.accumulated_pause_time = 0
                     
@@ -359,10 +362,6 @@ class StreamingVideoSync(VideoSync):
         position = frame_number / self.fps
         self.seek(position)
     
-    def play_segment(self, start_time: float, end_time: float):
-        """Play a specific segment from start_time to end_time."""
-        self.seek(start_time)
-        # Note: End time handling would need additional logic for auto-stop
     
     def pause(self):
         """Pause playback"""
@@ -413,12 +412,6 @@ class StreamingVideoSync(VideoSync):
         self.is_running = False
         self.timer.stop()
         self._emit_playback_state_changed(False)
-        
-        # Disconnect napari events
-        try:
-            self.viewer.dims.events.current_step.disconnect(self._on_napari_step_change)
-        except:
-            pass
         
         
         # Clean up video
@@ -501,7 +494,7 @@ class NapariVideoSync(VideoSync):
 
     def pause(self):
         """Pause playback using napari's built-in toggle."""
-        if self._napari_is_playing():
+        if self._napari_is_playing():   
             self.qt_viewer.dims.stop()
             self._emit_playback_state_changed(False)
 
@@ -532,7 +525,6 @@ class NapariVideoSync(VideoSync):
         end_time = end_frame / self.fps
         
         # Video
-        qt_dims = self.viewer.window._qt_viewer.dims
         self.seek_to_frame(start_frame)
         
         player: Optional[PlayAudio] = None
@@ -552,30 +544,35 @@ class NapariVideoSync(VideoSync):
             
             player = PlayAudio()
             player.play(data=segment, rate=float(rate), blocking=False)
+
         
+        frame_time = 1.0 / self.fps
+            
         # Use loop mode to prevent auto-reset
-        qt_dims.play(axis=0, fps=self.fps_playback, loop_mode="once", 
-                    frame_range=(start_frame, end_frame))
-        
+        self.qt_viewer.dims.play(axis=0, fps=self.fps_playback)
         
 
         
         # Monitor playback and preserve frame position when it stops
-        def monitor_playback(qt_viewer, qt_dims_ref):
-            while _get_current_play_status(qt_viewer):
-                time.sleep(0.1) 
-            
-
+        def monitor_playback(self_ref, player_ref: Optional[PlayAudio], end_frame: int, frame_time: float = frame_time):
+            while _get_current_play_status(self_ref.qt_viewer):
+                # Check if we've reached or passed the end frame
+                if self_ref.current_frame >= end_frame:
+                    # Stop playback
+                    self_ref.qt_viewer.dims.stop()
+                    self._emit_playback_state_changed(False)
+                    break
+                time.sleep(frame_time / 2) 
+               
             # Clean up audio
-            if player:
-                player.stop()
-                player.__exit__(None, None, None)
-                
-   
-            
-            
+            if player_ref:
+                player_ref.stop()
+                player_ref.__exit__(None, None, None)
+                del player_ref
+
+
         monitor_thread = threading.Thread(
-            target=lambda: monitor_playback(self.qt_viewer, qt_dims), 
+            target=lambda: monitor_playback(self, player, end_frame, frame_time),
             daemon=True
         )
         monitor_thread.start()

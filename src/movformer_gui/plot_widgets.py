@@ -72,7 +72,7 @@ class PlotsWidget(QWidget):
         layout.addWidget(self.spec_buffer_edit, 3, 3)
         
         # Note about jump size
-        self.jump_note_label = QLabel("*Jump size only works in LinePlot → Video mode")
+        self.jump_note_label = QLabel("*Jump size only works in Napari Video mode")
         self.jump_note_label.setStyleSheet("font-size: 9pt; color: #888;")
         main_layout.addWidget(self.jump_note_label)
 
@@ -149,10 +149,10 @@ class PlotsWidget(QWidget):
 
         # Update plot if available
         if self.lineplot is not None:
-            sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
+            sync_state = getattr(self.app_state, 'sync_state', 'napari_video_mode')
             
-            if sync_state == "video_to_lineplot":
-                # In video sync mode, changes will be applied automatically
+            if sync_state == "pyav_stream_mode":
+                # In stream mode, changes will be applied automatically
                 # by the lineplot's update timer
                 pass
             else:
@@ -190,11 +190,11 @@ class PlotsWidget(QWidget):
         
         self._on_edited()
 
-    # --- Shortcut methods (only work in lineplot_to_video mode) ---
+    # --- Shortcut methods (only work in napari_video_mode) ---
     
     def _check_interactive_mode(self) -> bool:
         """Check if we're in interactive mode."""
-        return getattr(self.app_state, 'sync_state', '') == 'lineplot_to_video'
+        return getattr(self.app_state, 'sync_state', '') == 'napari_video_mode'
 
     
     def _adjust_window_size(self, factor: float):

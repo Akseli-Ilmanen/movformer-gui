@@ -95,8 +95,6 @@ class MetaWidget(CollapsibleWidgetContainer):
         # Now set the data_widget reference in io_widget
         self.io_widget.data_widget = self.data_widget
 
-        # Set navigation_widget reference in app_state for property callback
-        self.app_state.lineplot = self.lineplot
 
         # Set up cross-references between widgets, so they can talk to each other
 

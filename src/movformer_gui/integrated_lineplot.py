@@ -52,7 +52,7 @@ class IntegratedLinePlot(QWidget):
         
         layout.addWidget(self.plot_widget, 1)
         
-        # Connect click handler only in lineplot_to_video mode
+        # Connect click handler for interactive functionality
         self.plot_widget.scene().sigMouseClicked.connect(self._handle_click)
         
   
@@ -66,24 +66,16 @@ class IntegratedLinePlot(QWidget):
         
         # Store interaction state
         self._interaction_enabled = True
-        self._last_window_center = None
+        self._last_window_center = None   
+        self.update_window_bool = False
 
     
-    def _on_sync_mode_changed(self, sync_state: str) -> None:
-        """Handle sync mode changes."""
-        if sync_state in ["video_to_lineplot", "pyav_to_lineplot"]:
-            self._set_video_sync_mode()
-        else:
-            self._set_interactive_mode()
-    
-    def _set_video_sync_mode(self) -> None:
+    def set_video_sync_mode(self) -> None:
         """Configure plot for video-sync mode (limited user interaction).
         
         In this mode:
         - Plot window auto-follows video playback
         - No direct plot panning/zooming with mouse
-        - Timeline slider remains active for seeking
-        - Space bar remains active for play/pause
         - Plot clicks are disabled
         """
         self._interaction_enabled = False
@@ -91,46 +83,39 @@ class IntegratedLinePlot(QWidget):
         # Disable mouse interactions ON THE PLOT ONLY
         self.vb.setMouseEnabled(x=False, y=False)
         
-        
         # Make time marker more prominent in this mode
         self.time_marker.setPen(pg.mkPen(color='r', width=3, style=pg.QtCore.Qt.SolidLine))
         self.time_marker.setZValue(1000)
 
-    def _set_interactive_mode(self) -> None:
-        """Configure plot for interactive mode (full user control).
+        self.update_window_bool = True
+        self._update_window_position()
+                
+
+    def set_dynamic_mode(self) -> None:
+        """Interactive when video is not playing (full mouse control, plot clicks work)"""
         
-        In this mode:
-        - Full mouse control of plot (pan, zoom)
-        - Plot clicks jump video to that time
-        - All keyboard shortcuts work
-        - Manual control of view window
-        - Smart zoom constraints prevent zooming outside data range
-        """
+        # Behave like interactive mode when not playing
         self._interaction_enabled = True
-        
-        # Enable full mouse interactions with the plot
         self.vb.setMouseEnabled(x=True, y=True)
-        
-        # Reapply zoom constraints in interactive mode
         self._apply_zoom_constraints()
         
-        # Hide time marker in interactive mode
-        self.time_marker.hide()
         
+        # Show time marker but make it less prominent
+        self.time_marker.setPen(pg.mkPen(color='r', width=1, style=pg.QtCore.Qt.DashLine))
+        self.time_marker.show()
+        self.time_marker.setZValue(100)
+        
+        self.update_window_bool = False
 
         
     def _update_window_position(self) -> None:
-        """Update window position to follow video in video_to_lineplot mode."""
-        if not hasattr(self.app_state, 'sync_state'):
-            return
-            
-            
+        """Update window position to follow video when appropriate."""
         if not hasattr(self.app_state, 'current_frame') or not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
             return
             
-        if not hasattr(self.app_state.ds, 'fps'):
+        if not self.update_window_bool:
             return
-        
+            
         current_time = self.app_state.current_frame / self.app_state.ds.fps
         window_size = self.app_state.get_with_default('window_size')
         
@@ -250,31 +235,26 @@ class IntegratedLinePlot(QWidget):
             self.app_state.features_sel,
             color_variable=color_var
         )
-        
-        # Handle view settings based on sync mode
-        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
-        if sync_state in ["video_to_lineplot", "pyav_to_lineplot"]:
-            # In video sync mode, immediately apply centered window
+        if self.update_window_bool:
             self._update_window_position()
         else:
-            # In interactive mode, preserve xlim if provided
+            # In interactive state, preserve xlim if provided
             preserve_xlim = None
             if t0 is not None and t1 is not None:
                 preserve_xlim = (t0, t1)
             apply_view_settings(self.plot_item, self.app_state, preserve_xlim)
-        
+            # Update dynamic mode settings in case playback state changed
+            self.set_dynamic_mode()
 
-        current_time = self.app_state.current_frame / self.app_state.ds.fps
-        self.time_marker.setValue(current_time)
 
 
     def update_yrange(self, ymin: Optional[float], 
                      ymax: Optional[float], 
                      window_size: Optional[float]) -> None:
         """Apply axis limits from state values."""
-        sync_state = getattr(self.app_state, 'sync_state', 'video_to_lineplot')
-        if sync_state in ["video_to_lineplot", "pyav_to_lineplot"]:
-            # In video sync mode, update will happen via _update_window_position
+
+        
+        if self.update_window_bool:
             return
             
         # In interactive mode, apply y-range normally
@@ -295,12 +275,6 @@ class IntegratedLinePlot(QWidget):
         }
         self.plot_clicked.emit(click_info)
     
-    def set_sync_mode(self, mode: str) -> None:
-        """Public method to set sync mode."""
-        if mode in ["video_to_lineplot", "pyav_to_lineplot"]:
-            self._set_video_sync_mode()
-        else:
-            self._set_interactive_mode()
     
     def get_current_xlim(self) -> Tuple[float, float]:
         """Get current x-axis limits."""

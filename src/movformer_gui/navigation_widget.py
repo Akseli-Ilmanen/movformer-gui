@@ -8,14 +8,12 @@ from qtpy.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButto
 class NavigationWidget(QWidget):
     """Widget for trial navigation and sync toggle between video and lineplot."""
 
-    sync_mode_changed = Signal(str)
 
     def __init__(self, viewer: Viewer, app_state, parent=None):
         super().__init__(parent=parent)
         self.viewer = viewer
         self.app_state = app_state
         self.data_widget = None
-        self.lineplot = None  # Will be set after creation
 
         # Trial selection combo
         self.trials_combo = QComboBox()
@@ -46,9 +44,8 @@ class NavigationWidget(QWidget):
         self.sync_toggle_btn.setObjectName("sync_toggle_btn")
         self.sync_toggle_btn.addItems(
             [
-                "Sync: Napari-Video → LinePlot (Follow Video)",
-                "Sync: LinePlot → Napari-Video (Interactive Plot)",
-                "Sync: Napari-PyavStream → LinePlot (Follow Video)",
+                "Napari Video Mode (Interactive + Follow on Play)",
+                "PyAV Video/Audio Stream Mode (Follow Video)",
             ]
         )
         self.sync_toggle_btn.currentIndexChanged.connect(self.toggle_sync)
@@ -78,59 +75,47 @@ class NavigationWidget(QWidget):
 
         # Initialize sync state from app_state
         sync_state = getattr(self.app_state, "sync_state", None)
-        if sync_state == "video_to_lineplot":
+        if sync_state == "napari_video_mode":
             self.sync_toggle_btn.setCurrentIndex(0)
-        elif sync_state == "lineplot_to_video":
+        elif sync_state == "pyav_stream_mode":
             self.sync_toggle_btn.setCurrentIndex(1)
-        elif sync_state == "pyav_to_lineplot":
-            self.sync_toggle_btn.setCurrentIndex(2)
-
         else:
-            # Default to video_to_lineplot
+            # Default to napari_video_mode
             self.sync_toggle_btn.setCurrentIndex(0)
-            self.app_state.sync_state = "video_to_lineplot"
+            self.app_state.sync_state = "napari_video_mode"
 
     def set_data_widget(self, data_widget):
         """Set reference to data widget."""
         self.data_widget = data_widget
 
-    def set_lineplot(self, lineplot):
-        """Set reference to lineplot widget."""
-        self.lineplot = lineplot
+
 
     def toggle_sync(self) -> None:
         """Toggle between sync modes."""
         current_index = self.sync_toggle_btn.currentIndex()
 
         if current_index == 0:
-            new_mode = "video_to_lineplot"
+            new_mode = "napari_video_mode"
         elif current_index == 1:
-            new_mode = "lineplot_to_video"
-        elif current_index == 2:
-            new_mode = "pyav_to_lineplot"
+            new_mode = "pyav_stream_mode"
 
         # Update app state
         self.app_state.sync_state = new_mode
         
-        # Emit signal for other components
-        self.sync_mode_changed.emit(new_mode)
-
-        # Update lineplot mode if available
-        if self.lineplot and self.app_state.ready:
-            self.lineplot.set_sync_mode(new_mode)
-            self.lineplot.update_plot()
-        
         # Trigger video player switching by updating video/audio
         if self.data_widget and self.app_state.ready:
-            self.data_widget._update_video_audio()
+            self.data_widget.update_video_audio()
+            self.data_widget.update_plot()
+
+
 
 
     def _trial_change_consequences(self):
         """Handle consequences of trial changes."""
         if self.data_widget:
-            self.data_widget._update_tracking()
-            self.data_widget._update_video_audio()
-            self.data_widget._update_plot()
+            self.data_widget.update_tracking()
+            self.data_widget.update_video_audio()
+            self.data_widget.update_plot()
 
     def _on_trial_changed(self):
         """Handle trial selection change."""
