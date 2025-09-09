@@ -546,7 +546,7 @@ class NapariVideoSync(VideoSync):
             player.play(data=segment, rate=float(rate), blocking=False)
 
         
-        frame_time = 1.0 / self.fps
+        frame_time = 1.0 / self.fps_playback
             
         # Use loop mode to prevent auto-reset
         self.qt_viewer.dims.play(axis=0, fps=self.fps_playback)
