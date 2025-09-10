@@ -292,7 +292,10 @@ class MetaWidget(CollapsibleWidgetContainer):
             
         @viewer.bind_key("ctrl+p", overwrite=True)
         def toggle_sync(v):
-            self.navigation_widget.toggle_sync()
+            current_index = self.navigation_widget.sync_toggle_btn.currentIndex()
+            total_options = self.navigation_widget.sync_toggle_btn.count()
+            next_index = (current_index + 1) % total_options
+            self.navigation_widget.sync_toggle_btn.setCurrentIndex(next_index)
 
         def setup_keybindings_grid_layout(viewer, labels_widget):
             """Setup using grid layout for motif activation"""

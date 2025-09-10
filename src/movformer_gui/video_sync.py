@@ -3,7 +3,7 @@
 import napari
 import av
 import numpy as np
-from qtpy.QtCore import QTimer, QObject, Signal, Qt, Slot
+from qtpy.QtCore import QTimer, QObject, Signal, Qt, Slot, QThread, QMutex, QMutexLocker, QWaitCondition
 from qtpy.QtGui import QIntValidator
 from qtpy.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, 
@@ -31,7 +31,7 @@ class VideoSync(QObject):
     """Base class for video synchronization with common signals and interface."""
     
     frame_changed = Signal(int)  # Emitted when video frame changes
-    playback_state_changed = Signal(bool)  # Emitted when play/pause state changes
+
     
     def __init__(self, viewer: napari.Viewer, app_state, video_source: str, audio_source: Optional[str] = None):
         super().__init__()
@@ -41,6 +41,7 @@ class VideoSync(QObject):
         self.audio_source = audio_source
         
         # Common state
+        self._is_playing = False
         self.total_frames = 0
         self.total_duration = 0.0
         self.fps = app_state.ds.fps
@@ -56,34 +57,26 @@ class VideoSync(QObject):
     
     @property
     def is_playing(self) -> bool:
-        """Get current playing state. Must be implemented by subclasses."""
-        raise NotImplementedError
+        """Get current playing state."""
+        return self._is_playing
         
     def toggle_play_pause(self):
         """Toggle between play and pause states."""
         if self.is_playing:
-            self.pause()
+            self.stop()
         else:
-            self.resume()
+            self.start()
     
     def start(self):
         """Start video playback. Must be implemented by subclasses."""
         raise NotImplementedError
     
-    def pause(self):
-        """Pause video playback. Must be implemented by subclasses."""
-        raise NotImplementedError
-    
-    def resume(self):
-        """Resume video playback. Must be implemented by subclasses."""
-        raise NotImplementedError
-    
     def stop(self):
         """Stop video playback. Must be implemented by subclasses."""
         raise NotImplementedError
-    
-    def seek(self, position: Union[float, int]):
-        """Seek to position (seconds or frame). Must be implemented by subclasses. Only needed for StreamerVideoSync."""
+
+    def close(self):
+        """Cleanup resources. Must be implemented by subclasses."""
         raise NotImplementedError
     
     def seek_to_frame(self, frame_number: int):
@@ -99,16 +92,13 @@ class VideoSync(QObject):
         self.app_state.current_frame = frame_number
         self.frame_changed.emit(frame_number)
     
-    def _emit_playback_state_changed(self, is_playing: bool):
-        """Emit playback state changed signal."""
-        self.playback_state_changed.emit(is_playing)
+
+    
         
 class NapariVideoSync(VideoSync):
     """Napari-integrated video player using napari-video plugin."""
     
-    # Add internal signals for thread-safe communication
-    _frame_update_signal = Signal(int)
-    _window_reset_signal = Signal(int)
+
     
     def __init__(self, viewer: napari.Viewer, app_state, video_source: str, audio_source: Optional[str] = None):
         super().__init__(viewer, app_state, video_source, audio_source)
@@ -120,16 +110,12 @@ class NapariVideoSync(VideoSync):
         self.video_layer = None
         self.jump_frame = None
         
-        # Connect internal signals to main thread handlers with queued connections
-        self._frame_update_signal.connect(
-            self._handle_frame_update_main_thread, 
-            Qt.ConnectionType.QueuedConnection
-        )
-        self._window_reset_signal.connect(
-            self._handle_window_reset_main_thread,
-            Qt.ConnectionType.QueuedConnection
-        )
+        # Segment monitoring state
+        self._monitoring_segment = False
+        self._segment_end_frame = 0
+        self._segment_audio_player = None
         
+ 
         self._setup_video_layer()
     
     @property
@@ -166,68 +152,9 @@ class NapariVideoSync(VideoSync):
             frame_number = self.viewer.dims.current_step[0]
             
             # Emit signals to queue operations to main thread instead of direct UI calls
-            self._frame_update_signal.emit(frame_number)
+            self._emit_frame_changed(frame_number)
             
-            # Check if window reset needed (no UI operations in this thread)
-            if self._should_reset_window(frame_number):
-                self._window_reset_signal.emit(frame_number)
-    
-    def _should_reset_window(self, frame_number: int) -> bool:
-        """Quick check if window reset is needed - SAFE for animation thread."""
-        if not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
-            return False
-            
-        current_time = frame_number / self.fps
-        lineplot_widget = getattr(self.app_state, 'lineplot_widget', None)
-        
-        if lineplot_widget and hasattr(lineplot_widget, 'vb'):
-            try:
-                current_range = lineplot_widget.vb.viewRange()[0]  # [xmin, xmax]
-                xmin, xmax = current_range
-                return current_time < xmin or current_time > xmax
-            except:
-                return False
-        return False
-    
-    def _check_and_reset_lineplot_window(self, frame_number: int):
-        """Check if frame is outside current lineplot window and reset if needed."""
-        if not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
-            return
-            
-        # Get current time from frame
-        current_time = frame_number / self.fps
-        
-        # Try to get lineplot window bounds 
-        lineplot_widget = getattr(self.app_state, 'lineplot_widget', None)
-        if lineplot_widget and hasattr(lineplot_widget, 'vb'):
-            # Get current x-axis range from lineplot
-            current_range = lineplot_widget.vb.viewRange()[0]  # [xmin, xmax]
-            xmin, xmax = current_range
-            
-            # Check if current time is outside the visible window
-            if current_time < xmin or current_time > xmax:
-                # Reset lineplot to center around this timepoint
-                if hasattr(lineplot_widget, '_update_window_position'):
-                    # Store current frame in app_state so lineplot can center on it
-                    old_frame = getattr(self.app_state, 'current_frame', frame_number)
-                    self.app_state.current_frame = frame_number
-                    
-                    # Force window update in lineplot
-                    if hasattr(lineplot_widget, 'update_window_bool'):
-                        old_update_bool = lineplot_widget.update_window_bool
-                        lineplot_widget.update_window_bool = True
-                        lineplot_widget._update_window_position()
-                        lineplot_widget.update_window_bool = old_update_bool
-    
-    @Slot(int)
-    def _handle_frame_update_main_thread(self, frame_number: int):
-        """Handle frame updates on main thread - SAFE for UI operations."""
-        self._emit_frame_changed(frame_number)
-    
-    @Slot(int)
-    def _handle_window_reset_main_thread(self, frame_number: int):
-        """Handle window resets on main thread - SAFE for UI operations."""
-        self._check_and_reset_lineplot_window(frame_number)
+
     
     def _napari_is_playing(self) -> bool:
         """Check if napari is currently playing using internal functions."""
@@ -242,13 +169,24 @@ class NapariVideoSync(VideoSync):
         """Start playback using napari's built-in player."""
         if not self._napari_is_playing():
             self.qt_viewer.dims.play()
-            self._emit_playback_state_changed(True)
 
-    def pause(self):
-        """Pause playback using napari's built-in toggle."""
-        if self._napari_is_playing():   
+
+
+    def stop(self):
+        """Stop playback and cleanup.""" 
+        # Stop napari video 
+        if self._napari_is_playing():
             self.qt_viewer.dims.stop()
-            self._emit_playback_state_changed(False)
+
+
+    def close(self):
+ 
+        # Disconnect napari events
+        try:
+            self.viewer.dims.events.current_step.disconnect(self._on_napari_step_change)
+        except:
+            pass
+
 
     def resume(self):
         """Resume playback."""
@@ -298,8 +236,6 @@ class NapariVideoSync(VideoSync):
     
         self.qt_viewer.dims.play(axis=0, fps=fps_playback)
         
-
-        
         # Monitor playback and preserve frame position when it stops
         def monitor_playback(self_ref, player_ref: Optional[PlayAudio], end_frame: int, frame_time: float):
             while _get_current_play_status(self_ref.qt_viewer):
@@ -308,9 +244,9 @@ class NapariVideoSync(VideoSync):
                     
                     # Stop playback
                     self_ref.qt_viewer.dims.stop()
-                    self._emit_playback_state_changed(False)
+
                     break
-                time.sleep(frame_time / 5) 
+                time.sleep(frame_time / 20) 
                
             # Clean up audio
             if player_ref:
@@ -331,18 +267,7 @@ class NapariVideoSync(VideoSync):
 
         
         
-    def stop(self):
-        """Stop playback and cleanup.""" 
-        # Stop napari video 
-        if self._napari_is_playing():
-            self.pause()
-        self._emit_playback_state_changed(False)
-        
-        # Disconnect napari events
-        try:
-            self.viewer.dims.events.current_step.disconnect(self._on_napari_step_change)
-        except:
-            pass
+   
 
 
 class VideoSliderWidget(QWidget):
@@ -355,7 +280,6 @@ class VideoSliderWidget(QWidget):
         super().__init__(parent=parent)
         self.total_frames = max(1, total_frames)
         self.fps = fps
-        self._is_playing = False
         self.sync_manager = sync_manager  # Reference to parent sync manager
         self.app_state = sync_manager.app_state
         
@@ -446,12 +370,12 @@ class VideoSliderWidget(QWidget):
     
     def set_playing_state(self, is_playing):
         """Update play button appearance."""
-        self._is_playing = is_playing
         self.play_button.setText("⏸" if is_playing else "▶")
     
     def _on_play_clicked(self):
         """Handle play button clicks."""
-        self.play_toggled.emit(not self._is_playing)
+        current_playing = self.sync_manager.is_playing if self.sync_manager else False
+        self.play_toggled.emit(not current_playing)
     
     def _on_slider_changed(self, value):
         """Handle slider value changes."""
@@ -488,7 +412,154 @@ class VideoSliderWidget(QWidget):
             self.current_frame_input.setText(str(self.current_frame))
 
 
-class StreamingVideoSync(VideoSync):
+class VideoDecodeThread(QThread):
+    """QThread for video frame decoding."""
+    
+    frame_ready = Signal(object, float, int)  # frame, timestamp, frame_number
+    error_occurred = Signal(str)
+    
+    def __init__(self, video_container, video_stream, fps, start_position, frame_queue, parent=None):
+        super().__init__(parent)
+        self.video_container = video_container
+        self.video_stream = video_stream
+        self.fps = fps
+        self.start_position = start_position
+        self.frame_queue = frame_queue
+        self.wait_time = 0.1
+        self._is_playing = False
+        self._mutex = QMutex()
+        self._wait_condition = QWaitCondition()
+    
+    def set_playing(self, playing):
+        """Thread-safe way to set playing state."""
+        with QMutexLocker(self._mutex):
+            old_playing = self._is_playing
+            self._is_playing = playing
+            if not old_playing and playing:  # Starting playback
+                self._wait_condition.wakeAll()
+    
+    def run(self):
+        """Decode frames in thread."""
+        try:
+     
+            seek_target = int(self.start_position / self.video_stream.time_base)
+            self.video_container.seek(seek_target, stream=self.video_stream, any_frame=False, backward=True)
+            
+            while not self.isInterruptionRequested():
+                with QMutexLocker(self._mutex):
+                    if not self._is_playing:
+                        self._wait_condition.wait(self._mutex, 100)  # 100ms timeout
+                        continue
+                    is_playing = self._is_playing  # Safe copy under lock
+                
+                # Decode frames
+                for packet in self.video_container.demux(self.video_stream):
+                    if self.isInterruptionRequested():
+                        break
+                        
+                    for frame in packet.decode():
+                        if self.isInterruptionRequested() or not is_playing:
+                            break
+                            
+                  
+                        frame_time = float(frame.pts * self.video_stream.time_base)
+                        frame_number = int(frame_time * self.fps)
+                        
+                        # Skip frames before start position
+                        if frame_time < self.start_position:
+                            continue
+                        
+     
+                        img = frame.to_ndarray(format='rgb24')
+                        
+                        # Add frame to queue or emit signal
+                        if is_playing:
+                            try:
+                                self.frame_queue.put((img, frame_time, frame_number), timeout=self.wait_time)
+                            except:
+                                pass  # Skip frame if queue full
+                                
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+    
+    def requestInterruption(self):
+        """Properly interrupt the thread and clean up."""
+        super().requestInterruption()
+        with QMutexLocker(self._mutex):
+            self._wait_condition.wakeAll()
+            # Clear queue to prevent blocking
+            try:
+                while not self.frame_queue.empty():
+                    self.frame_queue.get_nowait()
+            except:
+                pass
+
+
+class AudioPlaybackThread(QThread):
+    """QThread for audio playback."""
+    
+    error_occurred = Signal(str)
+    
+    def __init__(self, audio_container, audio_stream, start_position, audio_output, parent=None):
+        super().__init__(parent)
+        self.audio_container = audio_container
+        self.audio_stream = audio_stream
+        self.start_position = start_position
+        self.audio_output = audio_output
+        self.wait_time = 0.1
+        self._is_playing = False
+        self._mutex = QMutex()
+        self._wait_condition = QWaitCondition()
+    
+    def set_playing(self, playing):
+        """Thread-safe way to set playing state."""
+        with QMutexLocker(self._mutex):
+            old_playing = self._is_playing
+            self._is_playing = playing
+            if not old_playing and playing:  # Starting playback
+                self._wait_condition.wakeAll()
+    
+    def run(self):
+        """Play audio in thread."""
+        if not self.audio_stream:
+            return
+            
+        try:
+   
+            if self.audio_container:
+                seek_target = int(self.start_position / self.audio_stream.time_base)
+                self.audio_container.seek(seek_target, stream=self.audio_stream)
+                
+            while not self.isInterruptionRequested():
+                with QMutexLocker(self._mutex):
+                    if not self._is_playing:
+                        self._wait_condition.wait(self._mutex, 100)  # 100ms timeout
+                        continue
+                    is_playing = self._is_playing  # Safe copy under lock
+                
+                # Decode and play audio
+                for packet in self.audio_container.demux(self.audio_stream):
+                    if self.isInterruptionRequested() or not is_playing:
+                        break
+                        
+                    for frame in packet.decode():
+               
+                        frame_time = float(frame.pts * self.audio_stream.time_base) if frame.pts else 0
+                        
+                        # Skip frames before start position
+                        if frame_time < self.start_position:
+                            continue
+                            
+                        # Convert to bytes and play
+                        audio_data = frame.to_ndarray().astype(np.int16).tobytes()
+                        if self.audio_output:
+                            self.audio_output.write(audio_data)
+                            
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
+class PyAVStreamerSync(VideoSync):
     """PyAV-based streaming video player with real-time decoding."""
     
     def __init__(self, viewer: napari.Viewer, app_state, video_source: str, audio_source: Optional[str] = None, 
@@ -503,10 +574,6 @@ class StreamingVideoSync(VideoSync):
         self.audio_queue = queue.Queue(maxsize=100)
         
         # State management
-        self.is_running = False
-        self._is_playing = False
-        self.seek_requested = False
-        self.seek_position = 0
         self.start_position = 0.0  # Position to start playback from
         
         # Video components
@@ -521,11 +588,8 @@ class StreamingVideoSync(VideoSync):
         self.audio_thread = None
         self.audio_sample_rate = 44100
         self.audio_channels = 2
-        
-        # Sync components
-        self.start_time = None
-        self.pause_time = None
-        self.accumulated_pause_time = 0
+
+
         
         # UI components
         self.image_layer = None
@@ -536,15 +600,9 @@ class StreamingVideoSync(VideoSync):
         self.slider_widget = VideoSliderWidget(fps=self.app_state.fps_playback, sync_manager=self)
         self.slider_widget.play_toggled.connect(self._on_slider_play_toggled)
         
-        # Connect playback state changes back to slider for consistent button updates
-        self.playback_state_changed.connect(self.slider_widget.set_playing_state)
         
         self.wait_time = 0.1
     
-    @property
-    def is_playing(self) -> bool:
-        """Return current playing state."""
-        return self._is_playing
     
     def _initialize_video(self):
         """Initialize video stream."""
@@ -555,7 +613,7 @@ class StreamingVideoSync(VideoSync):
             self.total_duration = float(self.video_stream.duration * self.video_stream.time_base)
             self.total_frames = int(self.total_duration * self.fps)
             
-            # Update slider with video properties
+
             self.slider_widget.set_total_frames(self.total_frames)
             
         except Exception as e:
@@ -585,38 +643,50 @@ class StreamingVideoSync(VideoSync):
             show_error(f"Audio initialization failed: {e}")
             self.enable_audio = False
     
+
+    
     def start(self):
         """Start streaming video and audio to napari."""
         self._initialize_video()
         self._initialize_audio()
+        self.slider_widget.set_playing_state(True)
+        
+        self.start_position = self.app_state.current_frame / self.fps
         
         # Get first frame to initialize the layer
         first_frame = self._get_frame_at_position(self.start_position)
-        if first_frame is not None:
-            if self.image_layer is None:
-                self.image_layer = self.viewer.add_image(
-                    first_frame,
-                    name='Video Stream'
+        if self.image_layer is None:
+            self.image_layer = self.viewer.add_image(
+                first_frame,
+                name='Video Stream'
                 )
-            else:
-                self.image_layer.data = first_frame
+
         
-        # Start playback
-        self.is_running = True
-        self.start_time = time.time() - self.start_position  # Account for starting position
-        self.accumulated_pause_time = 0
-        self.pause_time = None
-        self._emit_playback_state_changed(self._is_playing)
         
         # Start the decoding thread
-        self.decode_thread = threading.Thread(target=self._decode_frames)
-        self.decode_thread.daemon = True
+        self.decode_thread = VideoDecodeThread(
+            self.video_container, 
+            self.video_stream, 
+            self.fps, 
+            self.start_position, 
+            self.frame_queue,
+            parent=self
+        )
+        self.decode_thread.error_occurred.connect(lambda msg: print(f"Video decode error: {msg}"))
+        self.decode_thread.set_playing(True)
         self.decode_thread.start()
         
         # Start audio thread if enabled
         if self.enable_audio and self.audio_stream:
-            self.audio_thread = threading.Thread(target=self._play_audio)
-            self.audio_thread.daemon = True
+            self.audio_thread = AudioPlaybackThread(
+                self.audio_container,
+                self.audio_stream,
+                self.start_position,
+                self.audio_output,
+                parent=self
+            )
+            self.audio_thread.error_occurred.connect(lambda msg: print(f"Audio playback error: {msg}"))
+            self.audio_thread.set_playing(True)
             self.audio_thread.start()
         
         # Start the timer to update display
@@ -635,97 +705,6 @@ class StreamingVideoSync(VideoSync):
                 return frame.to_ndarray(format='rgb24')
         return None
     
-    def _decode_frames(self):
-        """Decode frames in a separate thread starting from start_position"""
-        # Seek to starting position
-        seek_target = int(self.start_position / self.video_stream.time_base)
-        self.video_container.seek(seek_target, stream=self.video_stream, any_frame=False, backward=True)
-        
-        while self.is_running:
-            try:
-                if not self._is_playing:
-                    time.sleep(self.wait_time) 
-                    continue
-                
-                # Decode frames
-                for packet in self.video_container.demux(self.video_stream):
-                    if not self.is_running:
-                        break
-
-                        
-                    for frame in packet.decode():
-                        # Check pause state more frequently in inner loop
-                        if not self._is_playing:
-                            break
-                            
-                        # Get frame timestamp
-                        frame_time = float(frame.pts * self.video_stream.time_base)
-                        frame_number = int(frame_time * self.fps)
-                        
-                        # Skip frames before start position
-                        if frame_time < self.start_position:
-                            continue
-                        
-                        # Convert frame to numpy array
-                        img = frame.to_ndarray(format='rgb24')
-                        
-                        # Add frame with timestamp to queue (only if still playing)
-                        if self._is_playing:
-                            try:
-                                self.frame_queue.put((img, frame_time, frame_number), timeout=self.wait_time)
-                            except queue.Full:
-                                # Skip frame if queue is full
-                                pass
-                        
-                        # Sync with real-time
-                        if self.start_time:
-                            elapsed = time.time() - self.start_time - self.accumulated_pause_time
-                            if frame_time > elapsed + self.wait_time:
-                                time.sleep(min(frame_time - elapsed, self.frame_time_playback))
-                                
-            except Exception as e:
-                print(f"Decoding error: {e}")
-                break
-    
-    def _play_audio(self):
-        """Play audio in a separate thread starting from start_position"""
-        if not self.audio_stream or not self.enable_audio:
-            return
-        
-        # Seek audio to starting position
-        if self.audio_container != self.video_container:
-            seek_target = int(self.start_position / self.audio_stream.time_base)
-            self.audio_container.seek(seek_target, stream=self.audio_stream)
-            
-        while self.is_running:
-            try:
-                if not self._is_playing:
-                    time.sleep(self.wait_time)
-                    continue
-                
-                # Decode and play audio
-                for packet in self.audio_container.demux(self.audio_stream):
-                    if not self.is_running or not self._is_playing:
-                        break
-                        
-                    for frame in packet.decode():
-                        # Get frame timestamp
-                        frame_time = float(frame.pts * self.audio_stream.time_base) if frame.pts else 0
-                        
-                        # Skip frames before start position
-                        if frame_time < self.start_position:
-                            continue
-                            
-                        # Convert to bytes
-                        audio_data = frame.to_ndarray().astype(np.int16).tobytes()
-                        
-                        # Play audio
-                        if self.audio_output:
-                            self.audio_output.write(audio_data)
-                            
-            except Exception as e:
-                print(f"Audio error: {e}")
-                break
     
     def update_frame(self):
         """Update the napari image layer with new frame"""
@@ -753,23 +732,15 @@ class StreamingVideoSync(VideoSync):
         elif position > self.total_duration:
             position = self.total_duration
             
-        # Store current playing state
-        was_playing = self._is_playing
-        
+
         # Stop current stream
         self.stop()
         
         # Set new starting position
         self.start_position = position
         
-        # Restart stream
-        self.start()
+
         
-        # Restore playing state
-        if was_playing:
-            self.resume()
-        else:
-            self.pause()
     
     def seek_to_frame(self, frame_number: int):
         """Seek to specific frame by restarting stream."""
@@ -778,25 +749,52 @@ class StreamingVideoSync(VideoSync):
         self.seek(position)
     
     
-    def pause(self):
-        """Pause playback"""
-        if self._is_playing:
-            self._is_playing = False
-            self.pause_time = time.time()
-            self._clear_frame_queue()
-            if self.enable_audio:
-                self._clear_audio_queue()
-            self._emit_playback_state_changed(False)
     
-    def resume(self):
-        """Resume playback"""
-        if not self._is_playing:
-            if self.pause_time:
-                self.accumulated_pause_time += time.time() - self.pause_time
-            self._is_playing = True
-            self.slider_widget.set_playing_state(True)
-            self._emit_playback_state_changed(True)
+
     
+    def stop(self):
+        """Stop the video stream"""
+        self.timer.stop()
+        self.slider_widget.set_playing_state(False)
+
+        
+        # Signal threads to stop playing first
+        if hasattr(self, 'decode_thread') and self.decode_thread:
+            self.decode_thread.set_playing(False)
+            self.decode_thread.quit()
+            self.decode_thread.wait()
+        if hasattr(self, 'audio_thread') and self.audio_thread:
+            self.audio_thread.set_playing(False)
+            self.audio_thread.quit()
+            self.audio_thread.wait()
+
+
+        # Clear queues immediately to prevent stale frames
+        self._clear_frame_queue()
+        self._clear_audio_queue()
+
+        
+        
+        
+        # Clean up video
+        if self.video_container:
+            self.video_container.close()
+            self.video_container = None
+            self.video_stream = None
+        
+        # Clean up audio
+        if hasattr(self, 'audio_output') and self.audio_output:
+            self.audio_output.stop_stream()
+            self.audio_output.close()
+            self.audio_output = None
+        if self.audio_player:
+            self.audio_player.terminate()
+            self.audio_player = None
+        if self.audio_container and self.audio_container != self.video_container:
+            self.audio_container.close()
+            self.audio_container = None
+
+
     
     def _clear_frame_queue(self):
         """Clear all frames from the frame queue"""
@@ -829,49 +827,14 @@ class StreamingVideoSync(VideoSync):
     def _on_slider_play_toggled(self, should_play: bool):
         """Handle play/pause toggle from slider."""
         if should_play:
-            self.resume()
+            self.start()
         else:
-            self.pause()
+            self.stop()
     
     def get_slider_widget(self) -> VideoSliderWidget:
         """Return the video slider widget for UI integration."""
         return self.slider_widget
 
-    def stop(self):
-        """Stop the video stream"""
-        self.is_running = False
-        self._is_playing = False
-        self.timer.stop()
-        self.slider_widget.set_playing_state(False)
-        self._emit_playback_state_changed(False)
-        
-        # Wait for threads to finish
-        if hasattr(self, 'decode_thread') and self.decode_thread and self.decode_thread.is_alive():
-            self.decode_thread.join(timeout=0.5)
-        if hasattr(self, 'audio_thread') and self.audio_thread and self.audio_thread.is_alive():
-            self.audio_thread.join(timeout=0.5)
-        
-        # Clear queues
-        self._clear_frame_queue()
-        self._clear_audio_queue()
-        
-        # Clean up video
-        if self.video_container:
-            self.video_container.close()
-            self.video_container = None
-            self.video_stream = None
-        
-        # Clean up audio
-        if hasattr(self, 'audio_output') and self.audio_output:
-            self.audio_output.stop_stream()
-            self.audio_output.close()
-            self.audio_output = None
-        if self.audio_player:
-            self.audio_player.terminate()
-            self.audio_player = None
-        if self.audio_container and self.audio_container != self.video_container:
-            self.audio_container.close()
-            self.audio_container = None
 
 
 

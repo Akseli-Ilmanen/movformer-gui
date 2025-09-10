@@ -67,10 +67,9 @@ class IntegratedLinePlot(QWidget):
         # Store interaction state
         self._interaction_enabled = True
         self._last_window_center = None   
-        self.update_window_bool = False
 
     
-    def set_video_sync_mode(self) -> None:
+    def set_stream_mode(self) -> None:
         """Configure plot for video-sync mode (limited user interaction).
         
         In this mode:
@@ -80,39 +79,34 @@ class IntegratedLinePlot(QWidget):
         """
         self._interaction_enabled = False
         
-        # Disable mouse interactions ON THE PLOT ONLY
+
         self.vb.setMouseEnabled(x=False, y=False)
         
-        # Make time marker more prominent in this mode
+
         self.time_marker.setPen(pg.mkPen(color='r', width=3, style=pg.QtCore.Qt.SolidLine))
         self.time_marker.setZValue(1000)
 
-        self.update_window_bool = True
+
                 
 
-    def set_dynamic_mode(self) -> None:
+    def set_label_mode(self) -> None:
         """Interactive when video is not playing (full mouse control, plot clicks work)"""
         
-        # Behave like interactive mode when not playing
+
         self._interaction_enabled = True
         self.vb.setMouseEnabled(x=True, y=True)
         self._apply_zoom_constraints()
         
-        
-        # Show time marker but make it less prominent
+   
         self.time_marker.setPen(pg.mkPen(color='r', width=1, style=pg.QtCore.Qt.DashLine))
         self.time_marker.show()
         self.time_marker.setZValue(100)
-        
-        self.update_window_bool = False
+
 
         
     def _update_window_position(self) -> None:
         """Update window position to follow video when appropriate."""
         if not hasattr(self.app_state, 'current_frame') or not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
-            return
-            
-        if not self.update_window_bool:
             return
             
         current_time = self.app_state.current_frame / self.app_state.ds.fps
@@ -248,7 +242,7 @@ class IntegratedLinePlot(QWidget):
             self.app_state.features_sel,
             color_variable=color_var
         )
-        if self.update_window_bool:
+        if self.app_state.sync_state == "pyav_stream_mode":
             self._update_window_position()
         else:
             # In interactive state, preserve xlim if provided
@@ -257,7 +251,7 @@ class IntegratedLinePlot(QWidget):
                 preserve_xlim = (t0, t1)
             apply_view_settings(self.plot_item, self.app_state, preserve_xlim)
             # Update dynamic mode settings in case playback state changed
-            self.set_dynamic_mode()
+            self.set_label_mode()
 
 
 
@@ -266,7 +260,7 @@ class IntegratedLinePlot(QWidget):
         """Apply axis limits from state values."""
 
         
-        if self.update_window_bool:
+        if self.app_state.sync_state == "pyav_stream_mode":
             return
             
         # In interactive mode, apply y-range normally

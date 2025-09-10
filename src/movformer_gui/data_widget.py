@@ -21,7 +21,7 @@ from qtpy.QtWidgets import (
 
 from .audio_cache import SharedAudioCache
 from .data_loader import load_dataset
-from .video_sync import NapariVideoSync, StreamingVideoSync
+from .video_sync import NapariVideoSync, PyAVStreamerSync
 from .audio_cache import SharedAudioCache
 from movformer.utils.xr_utils import sel_valid
 import napari
@@ -495,7 +495,7 @@ class DataWidget(DataLoader, QWidget):
             # Use fast streaming player (StreamingVideoSync)
 
                     
-            self.sync_manager = StreamingVideoSync(
+            self.sync_manager = PyAVStreamerSync(
                 viewer=self.viewer,
                 app_state=self.app_state,
                 video_source=self.app_state.video_path,
@@ -503,8 +503,9 @@ class DataWidget(DataLoader, QWidget):
             )
 
             self.app_state.current_frame = current_frame
+            # maybe REPLACE???
             self.sync_manager.start()
-            self.sync_manager.pause()
+            self.sync_manager.stop()
             self.sync_manager.seek_to_frame(current_frame)
                 
             # Add video slider to viewer window
@@ -529,9 +530,7 @@ class DataWidget(DataLoader, QWidget):
             
             self.sync_manager.seek_to_frame(current_frame)
 
-        # Connect playback state changes to sync mode control
-        # Connect playback state changes to sync mode control, passing is_playing as argument
-        self.sync_manager.playback_state_changed.connect(self.set_sync_mode)
+
         
 
         # Connect sync manager frame changes to app state and lineplot
@@ -548,11 +547,12 @@ class DataWidget(DataLoader, QWidget):
 
     def set_sync_mode(self, is_playing: bool) -> None:
         """Public method to set sync mode based on playback state."""
+        self.sync_manager.close()
 
-        if is_playing:
-            self.lineplot.set_video_sync_mode()
-        elif not is_playing and self.app_state.sync_state == "napari_video_mode":
-            self.lineplot.set_dynamic_mode()
+        if self.app_state.sync_state == "pyav_stream_mode":
+            self.lineplot.set_stream_mode()
+        elif self.app_state.sync_state == "napari_video_mode":
+            self.lineplot.set_label_mode()
             
         
     def _on_sync_frame_changed(self, frame_number: int):
@@ -560,7 +560,16 @@ class DataWidget(DataLoader, QWidget):
         self.app_state.current_frame = frame_number
         current_time = frame_number / self.app_state.ds.fps
         self.lineplot.time_marker.setValue(current_time)
-        self.lineplot._update_window_position()
+        xlim = self.lineplot.get_current_xlim()
+        
+        # Update window continously
+        if self.app_state.sync_state == "pyav_stream_mode":
+            self.lineplot._update_window_position()
+            
+        # Only update if out of bounds
+        elif self.app_state.sync_state == "napari_video_mode":
+            if current_time < xlim[0] or current_time > xlim[1]:
+                self.lineplot._update_window_position()
 
 
 

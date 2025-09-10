@@ -103,6 +103,7 @@ class NavigationWidget(QWidget):
 
         # Update app state
         self.app_state.sync_state = new_mode
+        self.data_widget.set_sync_mode(new_mode)
         
         # Trigger video player switching by updating video/audio
         if self.data_widget and self.app_state.ready:
