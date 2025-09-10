@@ -273,8 +273,11 @@ class MetaWidget(CollapsibleWidgetContainer):
         # TO ADD documentation for inbuild pyqgt graph shortcuts
         # Right click hold - pull left/right to adjust xlim, up/down to adjust ylim
 
+        
+        
         # Pause/play video/audio
         viewer = self.viewer
+        
         @viewer.bind_key("space", overwrite=True)
         def toggle_pause_resume(v):
             self.data_widget.toggle_pause_resume()

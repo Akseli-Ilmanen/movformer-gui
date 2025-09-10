@@ -64,6 +64,9 @@ class NavigationWidget(QWidget):
         row3 = QHBoxLayout()
         row3.addWidget(fps_label)
         row3.addWidget(self.fps_playback_edit)
+        self.fps_playback_edit.setToolTip(
+            "Note: For large FPS, NapariVideo playback fps values may not be reliable."
+        )
 
         row4 = QHBoxLayout()
         row4.addWidget(self.sync_toggle_btn)

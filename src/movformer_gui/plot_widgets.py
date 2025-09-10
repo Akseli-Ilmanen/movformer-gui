@@ -57,6 +57,9 @@ class PlotsWidget(QWidget):
         layout.addWidget(QLabel("Y max (spectrogram):"), 1, 2)
         layout.addWidget(self.spec_ymax_edit, 1, 3)
         
+        layout.addWidget(QLabel("Window size (s):"), 2, 0)
+        layout.addWidget(self.window_s_edit, 2, 1)
+        
         
         # Row 3: Audio buffer / Spectrogram buffer
         layout.addWidget(QLabel("Audio buffer (s):"), 3, 0)

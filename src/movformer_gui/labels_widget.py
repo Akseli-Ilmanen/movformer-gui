@@ -31,6 +31,12 @@ from movformer.features.changepoints import snap_to_nearest_changepoint
 from movformer.utils.labels import load_motif_mapping
 from movformer.utils.xr_utils import sel_valid
 import time
+import tempfile
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+import shutil
+import xarray as xr
 
 
 class LabelsWidget(QWidget):
@@ -195,7 +201,7 @@ class LabelsWidget(QWidget):
         self.motifs_table.setColumnWidth(2, 20)  # Color column narrow
 
         self.motifs_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.motifs_table.setMaximumHeight(250)
+        self.motifs_table.setMaximumHeight(400)
 
     def _create_control_buttons(self):
         """Create control buttons for labeling operations."""
@@ -587,7 +593,7 @@ class LabelsWidget(QWidget):
     
         self.app_state.ds = xr.open_dataset(nc_path)
         
-        # Mark changes as saved after successful save
+      
         self.app_state.changes_saved = True
 
         show_info(f"✅ File saved successfully: {nc_path.name}")
