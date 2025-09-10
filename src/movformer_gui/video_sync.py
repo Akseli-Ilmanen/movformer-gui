@@ -44,7 +44,6 @@ class VideoSync(QObject):
         self.total_frames = 0
         self.total_duration = 0.0
         self.fps = app_state.ds.fps
-        self.fps_playback = getattr(app_state, 'fps_playback', self.fps)
         
         # Audio properties
         self.sr = getattr(app_state.ds, 'sr', None) if hasattr(app_state, 'ds') else None
@@ -227,6 +226,7 @@ class NapariVideoSync(VideoSync):
         """Play a specific segment from start_frame to end_frame with audio."""
         start_time = start_frame / self.fps
         end_time = end_frame / self.fps
+        fps_playback = self.app_state.fps_playback 
         
         # Video
         self.seek_to_frame(start_frame)
@@ -243,22 +243,22 @@ class NapariVideoSync(VideoSync):
             if segment.shape[0] > 1:
                 segment = segment[:, 0]
 
-            slow_down_factor = self.fps_playback / self.fps
+            slow_down_factor = fps_playback / self.fps
             rate = slow_down_factor * self.sr
             
             player = PlayAudio()
             player.play(data=segment, rate=float(rate), blocking=False)
 
         
-        frame_time = 1.0 / self.fps_playback
+        frame_time = 1.0 / fps_playback
             
         # Use loop mode to prevent auto-reset
-        self.qt_viewer.dims.play(axis=0, fps=self.fps_playback)
+        self.qt_viewer.dims.play(axis=0, fps=fps_playback)
         
 
         
         # Monitor playback and preserve frame position when it stops
-        def monitor_playback(self_ref, player_ref: Optional[PlayAudio], end_frame: int, frame_time: float = frame_time):
+        def monitor_playback(self_ref, player_ref: Optional[PlayAudio], end_frame: int, frame_time: float):
             while _get_current_play_status(self_ref.qt_viewer):
                 # Check if we've reached or passed the end frame
                 if self_ref.app_state.current_frame >= end_frame:
@@ -267,7 +267,7 @@ class NapariVideoSync(VideoSync):
                     self_ref.qt_viewer.dims.stop()
                     self._emit_playback_state_changed(False)
                     break
-                time.sleep(frame_time / 2) 
+                time.sleep(frame_time / 10) 
                
             # Clean up audio
             if player_ref:
@@ -490,7 +490,7 @@ class StreamingVideoSync(VideoSync):
         self.timer.timeout.connect(self.update_frame)
         
         # Video slider widget
-        self.slider_widget = VideoSliderWidget(fps=self.fps_playback, sync_manager=self)
+        self.slider_widget = VideoSliderWidget(fps=self.app_state.fps_playback, sync_manager=self)
         self.slider_widget.play_toggled.connect(self._on_slider_play_toggled)
         
         # Connect playback state changes back to slider for consistent button updates
@@ -508,7 +508,7 @@ class StreamingVideoSync(VideoSync):
         try:
             self.video_container = av.open(self.video_source)
             self.video_stream = self.video_container.streams.video[0]
-            self.frame_time_playback = 1.0 / self.fps_playback
+            self.frame_time_playback = 1.0 / self.app_state.fps_playback
             self.total_duration = float(self.video_stream.duration * self.video_stream.time_base)
             self.total_frames = int(self.total_duration * self.fps)
             

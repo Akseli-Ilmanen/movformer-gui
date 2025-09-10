@@ -250,7 +250,7 @@ class LabelsWidget(QWidget):
         MOTIF_ID_TO_KEY[motif_id] = key
 
     # Row 2: Q-P (Motifs 11-20)
-    qwerty_row = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
+    qwerty_row = ['q', 'w', 'e', 'r', 't', 'z', 'u', 'i', 'o', 'p']
     for i, key in enumerate(qwerty_row):
         motif_id = i + 11
         MOTIF_ID_TO_KEY[motif_id] = key.upper()  # Display as uppercase for clarity
@@ -383,6 +383,9 @@ class LabelsWidget(QWidget):
         elif button == Qt.RightButton:
             if self._check_motif_click(x_clicked, labels):
                 self._play_segment()
+            else:
+                frame = int(x_clicked * self.app_state.ds.fps)
+                self.app_state.sync_manager.seek_to_frame(frame)
             return
 
         # Handle left-click for labeling/editing (only in label mode)
@@ -550,12 +553,10 @@ class LabelsWidget(QWidget):
         if not self.current_motif_id or len(self.current_motif_pos) != 2:
             return
 
-        if hasattr(self.app_state, "sync_manager") and self.app_state.sync_manager:
+        start_frame = self.current_motif_pos[0]
+        end_frame = self.current_motif_pos[1]
 
-            start_frame = self.current_motif_pos[0]
-            end_frame = self.current_motif_pos[1]
-
-            self.app_state.sync_manager.play_segment(start_frame, end_frame)
+        self.app_state.sync_manager.play_segment(start_frame, end_frame)
 
     def _save_updated_nc(self):
         """Save the updated NetCDF file with optional timestamp versioning."""

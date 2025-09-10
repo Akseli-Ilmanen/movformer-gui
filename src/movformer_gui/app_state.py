@@ -73,6 +73,7 @@ class AppState:
 
 
 class ObservableAppState(QObject):
+
     """State container with change notifications and computed properties."""
 
     # Signals for state changes
@@ -94,7 +95,19 @@ class ObservableAppState(QObject):
 
 
 
-
+    @property
+    def sel_attrs(self) -> dict:
+        """
+        Return all attributes ending with _sel or _sel_previous as a dict.
+        """
+        result = {}
+        for attr in dir(self):
+            if attr.endswith("_sel") or attr.endswith("_sel_previous"):
+                value = getattr(self, attr, None)
+                if not callable(value):
+                    result[attr] = value
+        return result
+    
 
     def get_with_default(self, key):
         """Return value from app state, or default from AppStateSpec if None."""
@@ -181,7 +194,12 @@ class ObservableAppState(QObject):
 
         if old_value != currentValue:
             self.data_updated.emit()
-    
+            
+    def set_key_sel_previous(self, type_key, previousValue):
+        """Set previous selection for a given key."""
+        prev_attr_name = f"{type_key}_sel_previous"
+        setattr(self, prev_attr_name, previousValue)
+
     def toggle_key_sel(self, type_key, data_widget=None):
         """Toggle between current and previous value for a given key."""
         attr_name = f"{type_key}_sel"
@@ -202,33 +220,16 @@ class ObservableAppState(QObject):
             self.data_updated.emit()
     
     def _update_combo_box(self, type_key, new_value, data_widget):
-        """Update the corresponding combo box in the UI."""
+        """Update the corresponding combo box in the UI and trigger its change signal."""
         try:
             # Check IOWidget combos first, then DataWidget combos
             combo = data_widget.io_widget.combos.get(type_key) or data_widget.combos.get(type_key)
             
             if combo is not None:
-                # Temporarily block signals to prevent triggering _on_combo_changed
-                combo.blockSignals(True)
                 combo.setCurrentText(str(new_value))
-                combo.blockSignals(False)
-                
-                # Manually trigger the combo change logic
-                self._trigger_combo_change_logic(type_key, data_widget)
+                combo.currentTextChanged.emit(combo.currentText())
         except (AttributeError, TypeError) as e:
             print(f"Error updating combo box for {type_key}: {e}")
-    
-    def _trigger_combo_change_logic(self, type_key, data_widget):
-        """Manually trigger the logic that would normally happen in _on_combo_changed."""
-        try:
-            if type_key in ["cameras", "mics"]:
-                data_widget.update_video_audio()
-            elif type_key == "tracking":
-                data_widget.update_tracking()
-            elif type_key in ["features", "individuals", "keypoints"]:
-                data_widget.update_plot()
-        except (AttributeError, TypeError) as e:
-            print(f"Error triggering combo change logic for {type_key}: {e}")
 
     # --- Save/Load methods ---
     def get_saveable_state_dict(self) -> dict:
@@ -257,7 +258,7 @@ class ObservableAppState(QObject):
         for key, value in state_dict.items():
             if value is None:
                 continue
-            if key in AppStateSpec.VARS or key.endswith("_sel"):
+            if key in AppStateSpec.VARS or key.endswith("_sel") or key.endswith("_sel_previous"):
                 setattr(self, key, value)
 
     def save_to_yaml(self, yaml_path: str | None = None) -> bool:

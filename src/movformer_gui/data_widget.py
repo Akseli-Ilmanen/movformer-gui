@@ -297,7 +297,8 @@ class DataWidget(DataLoader, QWidget):
             elif key == "tracking":
                 self.update_tracking()
             elif key in ["features", "colors", "individuals", "keypoints"]:
-                self.update_plot()
+                xmin, xmax = self.lineplot.get_current_xlim()
+                self.update_plot(t0=xmin, t1=xmax)
             elif key == "trial_conditions":
                 self._update_trial_condition_values()
 
@@ -307,7 +308,10 @@ class DataWidget(DataLoader, QWidget):
         for key, vars in self.type_vars_dict.items():
             # Check IOWidget combos first, then DataWidget combos
             combo = self.io_widget.combos.get(key) or self.combos.get(key)
-
+            
+            
+            
+            
             if combo is not None:
             
                 if self.app_state.key_sel_exists(key):
@@ -339,6 +343,12 @@ class DataWidget(DataLoader, QWidget):
             # Default to first value
             self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials[0]))
             self.app_state.trials_sel = int(self.app_state.trials[0])
+            
+   
+            
+
+       
+            
 
 
 
@@ -414,13 +424,15 @@ class DataWidget(DataLoader, QWidget):
         self.navigation_widget.trials_combo.blockSignals(False)
         self.update_plot()
 
-    def update_plot(self):
+    def update_plot(self, **kwargs):
         """Update the line plot with current trial/keypoint/variable selection."""
         if not self.app_state.ready:
             return
+        
+        
 
         try:
-            self.lineplot.update_plot()
+            self.lineplot.update_plot(**kwargs)
             # Sync logic removed; handled by AudioVideoSync classes
 
             ds = self.app_state.ds

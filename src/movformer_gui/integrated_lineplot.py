@@ -291,3 +291,6 @@ class IntegratedLinePlot(QWidget):
         self.plot_clicked.emit(click_info)
     
     
+    def get_current_xlim(self) -> Tuple[float, float]:
+        """Get current x-axis limits."""
+        return self.vb.viewRange()[0]

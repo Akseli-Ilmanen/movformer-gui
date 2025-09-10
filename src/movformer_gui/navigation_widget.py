@@ -171,9 +171,8 @@ class NavigationWidget(QWidget):
         self.app_state.fps_playback = fps_playback
 
         # Update the playback settings in the viewer if using napari mode
-        if getattr(self.app_state, 'sync_state', '') == 'napari_video_mode':
-            qt_dims = self.viewer.window.qt_viewer.dims
-            if qt_dims.slider_widgets:
-                slider_widget = qt_dims.slider_widgets[0]
-                slider_widget._update_play_settings(fps=fps_playback, loop_mode="once", frame_range=None)
-    
+        qt_dims = self.viewer.window.qt_viewer.dims
+        if qt_dims.slider_widgets:
+            slider_widget = qt_dims.slider_widgets[0]
+            slider_widget._update_play_settings(fps=fps_playback, loop_mode="once", frame_range=None)
+

@@ -226,7 +226,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         
         
         number_keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
-        qwerty_row = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
+        qwerty_row = ['q', 'w', 'e', 'r', 't', 'z', 'u', 'i', 'o', 'p']
         home_row = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';']
         control_row = ['e', 'd', 'f', 'i', 'k', 'c', 'm', 't', 'n', 'p']
         other = ['y', 'space', 'Up', 'Down']
@@ -297,7 +297,7 @@ class MetaWidget(CollapsibleWidgetContainer):
             number_keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
             
             # Row 2: Q-P (Motifs 11-20)
-            qwerty_row = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
+            qwerty_row = ['q', 'w', 'e', 'r', 't', 'z', 'u', 'i', 'o', 'p']
             
             # Row 3: A-; (Motifs 21-30)
             home_row = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';']
