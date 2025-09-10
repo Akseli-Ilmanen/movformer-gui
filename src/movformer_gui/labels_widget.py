@@ -57,7 +57,8 @@ class LabelsWidget(QWidget):
 
         # Labeling state
         self.motif_mappings: dict[int, dict[str, Any]] = {}
-        self.ready_for_click = False
+        self.ready_for_label_click = False
+        self.ready_for_play_click = False
         self.first_click = None
         self.second_click = None
         self.selected_motif_id = 0
@@ -201,7 +202,7 @@ class LabelsWidget(QWidget):
         self.motifs_table.setColumnWidth(2, 20)  # Color column narrow
 
         self.motifs_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.motifs_table.setMaximumHeight(400)
+        self.motifs_table.setMaximumHeight(600)
 
     def _create_control_buttons(self):
         """Create control buttons for labeling operations."""
@@ -347,20 +348,25 @@ class LabelsWidget(QWidget):
                 return
             # Set selected motif and start labeling
             self.selected_motif_id = motif_id
-            # Find and select the corresponding row in the table
+
+            #  Find and select the corresponding row in the table
             for row in range(self.motifs_table.rowCount()):
                 item = self.motifs_table.item(row, 0)  # ID column
                 if item and item.data(Qt.UserRole) == motif_id:
                     self.motifs_table.selectRow(row)
                     self.motifs_table.scrollToItem(item)
                     break
-            self.ready_for_click = True
+            self.ready_for_label_click = True
             self.first_click = None
             self.second_click = None
 
             print(
                 f"Ready to label motif {motif_id} ({self.motif_mappings[motif_id]['name']}) - click twice to define region"
             )
+            
+        
+            
+            
 
     def _on_plot_clicked(self, click_info):
         """Handle mouse clicks on the lineplot widget.
@@ -381,24 +387,23 @@ class LabelsWidget(QWidget):
 
 
 
-        if button == Qt.LeftButton and not self.ready_for_click:
+        if button == Qt.LeftButton and not self.ready_for_label_click:
             # Select motif -> Then can delete or edit
             self._check_motif_click(x_clicked, labels)
 
         # Handle right-click - play video of motif if clicking on one
         elif button == Qt.RightButton:
-            if self._check_motif_click(x_clicked, labels):
-                self._play_segment()
-            else:
-                frame = int(x_clicked * self.app_state.ds.fps)
-                self.app_state.sync_manager.seek_to_frame(frame)
-            return
+            frame = int(x_clicked * self.app_state.ds.fps)
+            self.app_state.sync_manager.seek_to_frame(frame)
 
+        
         # Handle left-click for labeling/editing (only in label mode)
-        elif button == Qt.LeftButton and self.ready_for_click:
+        elif button == Qt.LeftButton and self.ready_for_label_click:
+    
             # Snap to nearest changepoint if available
             x_clicked_idx = int(x_clicked * self.app_state.ds.fps)  # Convert to frame index
             x_snapped = self._snap_to_changepoint(x_clicked_idx)
+
 
             if self.first_click is None:
                 # First click - just store the position
@@ -407,7 +412,6 @@ class LabelsWidget(QWidget):
                 # Second click - store position and automatically apply
                 self.second_click = x_snapped
                 self._apply_motif()  # Automatically apply after two clicks
-
 
 
 
@@ -484,7 +488,7 @@ class LabelsWidget(QWidget):
             # Reset selection
             self.first_click = None
             self.second_click = None
-            self.ready_for_click = False
+            self.ready_for_label_click = False
 
             # Save updated labels back to dataset
             self.app_state.ds["labels"].loc[filt_kwargs] = labels
@@ -498,6 +502,9 @@ class LabelsWidget(QWidget):
             
             # Refresh the shapes layer to show updated motifs
             self.refresh_motif_shapes_layer()
+
+
+
 
     def _delete_motif(self):
         with self._disable_sync_during_labeling():
@@ -544,7 +551,7 @@ class LabelsWidget(QWidget):
         self.old_motif_id = self.current_motif_id
         
         # Enter editing mode - user needs to click twice to set new boundaries
-        self.ready_for_click = True
+        self.ready_for_label_click = True
         self.first_click = None
         self.second_click = None
         
@@ -552,17 +559,21 @@ class LabelsWidget(QWidget):
         return
 
     def _play_segment(self):
+        with self._disable_sync_during_labeling():
+            if self.current_motif_pos is None:
+                return
 
-        if not self.app_state.sync_state == "napari_video_mode":
-            return
+            if (
+                self.app_state.sync_state != "napari_video_mode"
+                or not self.current_motif_id
+                or len(self.current_motif_pos) != 2
+            ):
+                return
 
-        if not self.current_motif_id or len(self.current_motif_pos) != 2:
-            return
+            start_frame = self.current_motif_pos[0]
+            end_frame = self.current_motif_pos[1]
 
-        start_frame = self.current_motif_pos[0]
-        end_frame = self.current_motif_pos[1]
-
-        self.app_state.sync_manager.play_segment(start_frame, end_frame)
+            self.app_state.sync_manager.play_segment(start_frame, end_frame)
 
     def _save_updated_nc(self):
         """Save the updated NetCDF file with optional timestamp versioning."""
