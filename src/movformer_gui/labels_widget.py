@@ -61,6 +61,10 @@ class LabelsWidget(QWidget):
         # Edit mode state  
         self.old_motif_pos: list[int] | None = None  # Original position when editing
         self.old_motif_id: int | None = None  # Original ID when editing
+        
+        # Frame tracking for motif display
+        self.previous_frame: int | None = None
+        self.current_motif_layer_name = "current_motif_display"
 
 
         # UI components
@@ -579,3 +583,83 @@ class LabelsWidget(QWidget):
         self.app_state.changes_saved = True
 
         show_info(f"✅ File saved successfully: {nc_path.name}")
+
+    def sync_frame_changed(self, current_frame: int):
+        """Called when the current frame changes - check if motif has changed and update display."""
+        # Skip if this is the same frame as before
+        if self.previous_frame == current_frame:
+            return
+            
+        # Get current data from app_state
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
+        
+        # Get the label at the current frame
+        if current_frame < len(labels):
+            current_label = int(labels[current_frame])
+        else:
+            current_label = 0
+            
+        # Check if label changed from previous frame
+        previous_label = 0
+        if self.previous_frame is not None and self.previous_frame < len(labels):
+            previous_label = int(labels[self.previous_frame])
+            
+        # If the label changed, update the display
+        if current_label != previous_label:
+            self.display_motif_name(current_label)
+            
+        # Update previous frame
+        self.previous_frame = current_frame
+
+    def display_motif_name(self, motif_id: int):
+        """Display the current motif name in a napari text layer at the top-right corner."""
+        # Remove existing motif display layer if it exists
+        if self.current_motif_layer_name in self.viewer.layers:
+            self.viewer.layers.remove(self.current_motif_layer_name)
+        
+        # If motif_id is 0 (background) or not in mappings, don't display anything
+        if motif_id == 0 or motif_id not in self.motif_mappings:
+            return
+            
+        # Get motif data
+        motif_data = self.motif_mappings[motif_id]
+        motif_name = motif_data["name"]
+        color = motif_data["color"]
+        
+        # Convert color to RGB values (0-255)
+        color_rgb = [int(c * 255) for c in color]
+        
+        # Create a small text layer positioned at top-right
+        # We'll use a single point with text to display the motif name
+        # Position it in the top-right area of the canvas
+        canvas_shape = self.viewer.canvas.size
+        if canvas_shape is not None:
+            # Position near top-right corner
+            x_pos = canvas_shape[0] * 0.85  # 85% from left
+            y_pos = canvas_shape[1] * 0.05  # 5% from top
+        else:
+            # Fallback position
+            x_pos, y_pos = 100, 20
+            
+        # Create text layer with white background and colored text
+        text_layer = self.viewer.add_points(
+            [[y_pos, x_pos]],  # napari uses (y, x) coordinate system
+            name=self.current_motif_layer_name,
+            size=0,  # Make points invisible
+            face_color='white',
+            edge_color='white',
+            opacity=0.9
+        )
+        
+        # Add text properties
+        text_layer.text = {
+            'string': f" {motif_name} ",
+            'size': 16,
+            'color': color_rgb + [255],  # Add alpha channel
+            'anchor': 'upper_right',
+            'translation': [-10, -10]  # Small offset from corner
+        }
+        
+        # Ensure it's on top
+        text_layer.z_index = 1000
