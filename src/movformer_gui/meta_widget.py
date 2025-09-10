@@ -276,8 +276,8 @@ class MetaWidget(CollapsibleWidgetContainer):
         # Pause/play video/audio
         viewer = self.viewer
         @viewer.bind_key("space", overwrite=True)
-        def toggle_play_pause(v):
-            self.data_widget.toggle_play_pause()
+        def toggle_pause_resume(v):
+            self.data_widget.toggle_pause_resume()
         
         # In napari video, can user left, right arrow keys to go back/forward one frame
         

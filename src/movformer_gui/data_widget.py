@@ -503,10 +503,9 @@ class DataWidget(DataLoader, QWidget):
             )
 
             self.app_state.current_frame = current_frame
-            # maybe REPLACE???
             self.sync_manager.start()
-            self.sync_manager.stop()
-            self.sync_manager.seek_to_frame(current_frame)
+            self.sync_manager.pause()
+            
                 
             # Add video slider to viewer window
             self._add_video_slider_to_viewer()
@@ -545,9 +544,18 @@ class DataWidget(DataLoader, QWidget):
 
 
 
+    def toggle_pause_resume(self):
+        """Toggle play/pause state of the video/audio stream."""
+        if not self.sync_manager:
+            return
+        self.sync_manager.toggle_pause_resume()
+        
+        
+        
     def set_sync_mode(self, is_playing: bool) -> None:
         """Public method to set sync mode based on playback state."""
-        self.sync_manager.close()
+        
+        # self.sync_manager.close()
 
         if self.app_state.sync_state == "pyav_stream_mode":
             self.lineplot.set_stream_mode()
@@ -605,11 +613,6 @@ class DataWidget(DataLoader, QWidget):
             self._add_boxes_layer()
         self._set_initial_state()
 
-    def toggle_play_pause(self):
-        """Toggle play/pause state of the video/audio stream."""
-        if not self.sync_manager:
-            return
-        self.sync_manager.toggle_play_pause()
 
 
     def closeEvent(self, event):

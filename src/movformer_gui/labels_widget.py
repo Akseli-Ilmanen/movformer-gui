@@ -678,9 +678,6 @@ class LabelsWidget(QWidget):
         update_motif_text()
         
         end_time = time.perf_counter()
-        print(f"_add_motif_shapes_layer: total={end_time - start_time:.3f}s, "
-            f"add_shapes={t_after_shapes - t_before_shapes:.3f}s")
-        
         return shapes_layer
     
     def _remove_motif_shapes_layer(self):
