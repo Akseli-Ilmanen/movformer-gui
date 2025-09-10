@@ -9,7 +9,7 @@ from qtpy.QtWidgets import QApplication, QSizePolicy, QMessageBox
 
 from .app_state import ObservableAppState
 from .data_widget import DataWidget
-from .integrated_lineplot import IntegratedLinePlot
+from .line_plot import LinePlot
 from .labels_widget import LabelsWidget
 from .navigation_widget import NavigationWidget
 from .io_widget import IOWidget
@@ -58,7 +58,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         """Create all widgets with app_state passed to each one."""
 
         # LinePlot widget docked at the bottom with 1/3 height from bottom
-        self.lineplot = IntegratedLinePlot(self.viewer, self.app_state)
+        self.lineplot = LinePlot(self.viewer, self.app_state)
 
         # Set size policy to allow vertical expansion but with preferred minimum
         self.lineplot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -107,8 +107,9 @@ class MetaWidget(CollapsibleWidgetContainer):
 
         # Set up cross-references between widgets, so they can talk to each other
 
-        # Needs data widget for updating plots after navigation
+        # Needs data widget for updating plots after navigation/label clicks
         self.navigation_widget.set_data_widget(self.data_widget)
+        self.labels_widget.set_data_widget(self.data_widget)
 
         # Labels and plot widgets need lineplot read info (e.g. xClicked) and apply plotting
         self.labels_widget.set_lineplot(self.lineplot)
@@ -303,6 +304,12 @@ class MetaWidget(CollapsibleWidgetContainer):
             total_options = self.navigation_widget.sync_toggle_btn.count()
             next_index = (current_index + 1) % total_options
             self.navigation_widget.sync_toggle_btn.setCurrentIndex(next_index)
+            
+        @viewer.bind_key("ctrl+l", overwrite=True)
+        def toggle_lock_axes(v):
+            current_boolean = self.plots_widget.lock_axes_checkbox.isChecked()
+            self.plots_widget.lock_axes_checkbox.setChecked(not current_boolean)
+
 
         def setup_keybindings_grid_layout(viewer, labels_widget):
             """Setup using grid layout for motif activation"""

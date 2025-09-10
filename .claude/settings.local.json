@@ -17,7 +17,8 @@
       "mcp__filesystem-readonly__list_directory",
       "mcp__filesystem-readonly__search_files",
       "mcp__filesystem-readonly__read_text_file",
-      "Bash(echo $env:APPDATA)"
+      "Bash(echo $env:APPDATA)",
+      "Bash(cat:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Admin\\anaconda3\\envs",

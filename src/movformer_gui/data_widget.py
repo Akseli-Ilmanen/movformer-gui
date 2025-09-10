@@ -28,6 +28,8 @@ import napari
 from movement.napari.loader_widgets import DataLoader
 from pathlib import Path
 from typing import Optional
+from .space_plot import SpacePlot
+
 
 class DataWidget(DataLoader, QWidget):
     """Widget to control which data is loaded, displayed and stored for next time."""
@@ -55,6 +57,7 @@ class DataWidget(DataLoader, QWidget):
         self.audio_player = None  # Audio player widget
         self.video_path = None
         self.audio_path = None
+        self.space_plot = None  # SpacePlot widget
 
         # Dictionary to store all combo boxes
         self.combos = {}
@@ -179,16 +182,15 @@ class DataWidget(DataLoader, QWidget):
 
         self._set_controls_enabled(True)
 
-        self.update_plot()
-        self.update_video_audio()
-        self.update_motif_label()
-        self.update_tracking()
+        
+        self.navigation_widget._trial_change_consequences()
+
 
         load_btn = self.io_widget.load_button
         load_btn.setEnabled(False)
         load_btn.setText("Restart app to load new data")
 
-        self.app_state.current_frame = 0
+
 
         self.setVisible(True)
         self._remove_ugly()
@@ -213,6 +215,14 @@ class DataWidget(DataLoader, QWidget):
         self.plot_spec_checkbox.stateChanged.connect(self._on_plot_spec_checkbox_changed)
         self.layout().addRow(self.plot_spec_checkbox)
         self.controls.append(self.plot_spec_checkbox)
+
+        # Add space plot combo
+        self.space_plot_combo = QComboBox()
+        self.space_plot_combo.setObjectName("space_plot_combo")
+        self.space_plot_combo.addItems(["Layer controls", "plot_box_topview", "plot_centroid_trajectory"])
+        self.space_plot_combo.currentTextChanged.connect(self._on_space_plot_changed)
+        self.layout().addRow("On the left show:", self.space_plot_combo)
+        self.controls.append(self.space_plot_combo)
 
         # 5. Add gap (empty row) for separation
         gap_label = QLabel("")
@@ -299,6 +309,8 @@ class DataWidget(DataLoader, QWidget):
             elif key in ["features", "colors", "individuals", "keypoints"]:
                 xmin, xmax = self.lineplot.get_current_xlim()
                 self.update_plot(t0=xmin, t1=xmax)
+                if key in ["individuals", "keypoints"]:
+                    self.update_space_plot()
             elif key == "trial_conditions":
                 self._update_trial_condition_values()
 
@@ -343,6 +355,11 @@ class DataWidget(DataLoader, QWidget):
             # Default to first value
             self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials[0]))
             self.app_state.trials_sel = int(self.app_state.trials[0])
+            
+        # Restore space plot type
+        space_plot_type = getattr(self.app_state, 'space_plot_type', 'None')
+        if hasattr(self, 'space_plot_combo'):
+            self.space_plot_combo.setCurrentText(space_plot_type)
             
    
             
@@ -535,8 +552,7 @@ class DataWidget(DataLoader, QWidget):
         # Connect sync manager frame changes to app state and lineplot
         self.sync_manager.frame_changed.connect(self._on_sync_frame_changed)
 
-        # Indirectly give other widgets acess to sync manager via app state
-        self.app_state.sync_manager = self.sync_manager
+
 
     def update_motif_label(self):
         """Update motif label display."""
@@ -620,8 +636,7 @@ class DataWidget(DataLoader, QWidget):
 
         SharedAudioCache.clear_cache()
 
-        if hasattr(self.app_state, "sync_manager") and self.app_state.sync_manager:
-            self.app_state.sync_manager.stop()
+        self.sync_manager.stop()
 
         super().closeEvent(event)
 
@@ -630,3 +645,49 @@ class DataWidget(DataLoader, QWidget):
         self.app_state.plot_spectrogram = bool(self.plot_spec_checkbox.isChecked())
 
         self.update_plot()
+
+    def _on_space_plot_changed(self):
+        """Handle space plot combo change."""
+        if not self.app_state.ready:
+            return
+            
+        plot_type = self.space_plot_combo.currentText()
+        self.app_state.space_plot_type = plot_type
+        self.update_space_plot()
+
+    def update_space_plot(self):
+        """Update space plot based on current selection."""
+        if not self.app_state.ready:
+            return
+
+        plot_type = getattr(self.app_state, 'space_plot_type', 'None')
+        
+        if plot_type == "Layer controls":
+            if self.space_plot:
+                self.space_plot.hide()            
+        else:
+            # Create space plot if it doesn't exist
+            if not self.space_plot:
+                self.space_plot = SpacePlot(self.viewer, self.app_state)
+                if self.labels_widget:
+                    self.labels_widget.highlight_spaceplot.connect(self._highlight_positions_in_space_plot)
+                
+            # Get current selections
+            trial = self.navigation_widget.trials_combo.currentText()
+            individual = self.combos.get('individuals', None)
+            individual_text = individual.currentText() if individual else None
+            keypoints = self.combos.get('keypoints', None)
+            keypoints_text = keypoints.currentText() if keypoints else None
+            color_variable = self.combos.get('colors', None)
+            color_variable = color_variable.currentText() if color_variable else None
+            
+            # Update plot
+            self.space_plot.update_plot(plot_type, trial, individual_text, keypoints_text, color_variable)
+            self.space_plot.show()
+            
+            
+
+    def _highlight_positions_in_space_plot(self, start_frame: int, end_frame: int):
+        """Highlight positions in space plot based on current frame."""
+        if self.space_plot and self.space_plot.dock_widget.isVisible():
+            self.space_plot.highlight_positions(start_frame, end_frame)

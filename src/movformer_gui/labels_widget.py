@@ -37,16 +37,20 @@ from datetime import datetime
 from typing import Optional
 import shutil
 import xarray as xr
-
+from qtpy.QtWidgets import QSizePolicy
+from qtpy.QtCore import Signal
 
 class LabelsWidget(QWidget):
     """Widget for labeling movement motifs in time series data."""
+    
+    highlight_spaceplot = Signal(int, int)
 
     def __init__(self, napari_viewer: Viewer, app_state, parent=None):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         self.app_state = app_state
         self.lineplot = None  # Will be set after creation
+        self.data_widget = None
 
         # Make widget focusable for keyboard events
         self.setFocusPolicy(Qt.StrongFocus)
@@ -91,6 +95,10 @@ class LabelsWidget(QWidget):
     def _mark_changes_unsaved(self):
         """Mark that changes have been made and are not saved."""
         self.app_state.changes_saved = False
+
+    def set_data_widget(self, data_widget):
+        """Set reference to data widget."""
+        self.data_widget = data_widget
 
     def set_lineplot(self, lineplot):
         """Set the lineplot reference and connect click handler."""
@@ -202,7 +210,8 @@ class LabelsWidget(QWidget):
         self.motifs_table.setColumnWidth(2, 20)  # Color column narrow
 
         self.motifs_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.motifs_table.setMaximumHeight(600)
+        self.motifs_table.setMaximumHeight(500)
+        self.motifs_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def _create_control_buttons(self):
         """Create control buttons for labeling operations."""
@@ -226,7 +235,7 @@ class LabelsWidget(QWidget):
         first_layout.addWidget(self.edit_button)
 
         # Play button
-        self.play_button = QPushButton("Play (Right-click)")
+        self.play_button = QPushButton("Play (V)")
         self.play_button.clicked.connect(self._play_segment)
         first_layout.addWidget(self.play_button)
 
@@ -390,11 +399,12 @@ class LabelsWidget(QWidget):
         if button == Qt.LeftButton and not self.ready_for_label_click:
             # Select motif -> Then can delete or edit
             self._check_motif_click(x_clicked, labels)
+            
 
         # Handle right-click - play video of motif if clicking on one
         elif button == Qt.RightButton:
             frame = int(x_clicked * self.app_state.ds.fps)
-            self.app_state.sync_manager.seek_to_frame(frame)
+            self.data_widget.sync_manager.seek_to_frame(frame)
 
         
         # Handle left-click for labeling/editing (only in label mode)
@@ -436,6 +446,8 @@ class LabelsWidget(QWidget):
 
             self.current_motif_id = motif_id
             self.current_motif_pos = [motif_start, motif_end]
+            self.highlight_spaceplot.emit(motif_start, motif_end)
+
             self.selected_motif_id = motif_id
             return True
         else:
@@ -464,6 +476,7 @@ class LabelsWidget(QWidget):
 
             start_idx = self.first_click
             end_idx = self.second_click
+            self.highlight_spaceplot.emit(start_idx, end_idx)
 
             # Handle overlapping labels (as in MATLAB code)
             if labels[end_idx] != 0:
@@ -573,7 +586,7 @@ class LabelsWidget(QWidget):
             start_frame = self.current_motif_pos[0]
             end_frame = self.current_motif_pos[1]
 
-            self.app_state.sync_manager.play_segment(start_frame, end_frame)
+            self.data_widget.sync_manager.play_segment(start_frame, end_frame)
 
     def _save_updated_nc(self):
         """Save the updated NetCDF file with optional timestamp versioning."""

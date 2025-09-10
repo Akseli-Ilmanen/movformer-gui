@@ -59,6 +59,8 @@ class AppStateSpec:
         "buffer_multiplier": (float, 5.0, True, float),
         "recompute_threshold": (float, 0.5, True, float),
         "cmap": (str, "magma", True, str),
+        "lock_axes": (bool, False, True, bool),
+        "space_plot_type": (str, "None", True, str),
         
     }
 

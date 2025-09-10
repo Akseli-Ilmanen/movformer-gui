@@ -117,12 +117,13 @@ class NavigationWidget(QWidget):
 
     def _trial_change_consequences(self):
         """Handle consequences of trial changes."""
-        if self.data_widget:
-            self.app_state.current_frame = 0
-            self.data_widget.update_tracking()
-            self.data_widget.update_video_audio()
-            self.data_widget.update_motif_label()
-            self.data_widget.update_plot()
+
+        self.app_state.current_frame = 0
+        self.data_widget.update_tracking()
+        self.data_widget.update_video_audio()
+        self.data_widget.update_motif_label()
+        self.data_widget.update_plot()
+        self.data_widget.update_space_plot()
 
     def _on_trial_changed(self):
         """Handle trial selection change."""

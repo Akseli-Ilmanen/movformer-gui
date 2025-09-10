@@ -13,8 +13,7 @@ from src.movformer_gui.plot_utils import (
     get_motif_colours
 )
 
-
-class IntegratedLinePlot(QWidget):
+class LinePlot(QWidget):
     """Main line plot widget with video-sync capabilities.
     
     Features:
@@ -55,6 +54,9 @@ class IntegratedLinePlot(QWidget):
         # Connect click handler for interactive functionality
         self.plot_widget.scene().sigMouseClicked.connect(self._handle_click)
         
+        # Connect viewbox range change signal to update plot controls
+        self.vb.sigRangeChanged.connect(self._on_viewbox_range_changed)
+        
   
         
         # Data bounds for smart zoom constraints
@@ -64,9 +66,16 @@ class IntegratedLinePlot(QWidget):
         self._data_y_max = None
         self._min_time_range = 0.001  # Minimum zoom range for time axis
         
+
         # Store interaction state
         self._interaction_enabled = True
         self._last_window_center = None   
+        
+        self.axes_listening = True
+        
+        
+        # Reference to plots widget for updating controls
+        self.plots_widget = None
 
     
     def set_stream_mode(self) -> None:
@@ -86,7 +95,7 @@ class IntegratedLinePlot(QWidget):
         self.time_marker.setPen(pg.mkPen(color='r', width=3, style=pg.QtCore.Qt.SolidLine))
         self.time_marker.setZValue(1000)
 
-
+        self.app_state.lock_axes = True
                 
 
     def set_label_mode(self) -> None:
@@ -95,7 +104,6 @@ class IntegratedLinePlot(QWidget):
 
         self._interaction_enabled = True
         self.vb.setMouseEnabled(x=True, y=True)
-        self._apply_zoom_constraints()
         
    
         self.time_marker.setPen(pg.mkPen(color='r', width=1, style=pg.QtCore.Qt.DashLine))
@@ -151,47 +159,17 @@ class IntegratedLinePlot(QWidget):
             
             
         
-    def _update_data_bounds(self):
-        """Update data bounds from current dataset for zoom constraints."""
-        if not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
-            return
-            
-        # Get time bounds
-        time = self.app_state.ds.time.values
-        self._data_time_min = float(time[0]) if len(time) > 0 else 0.0
-        self._data_time_max = float(time[-1]) if len(time) > 0 else 10.0
-        
-        # Set minimum time range based on data duration
-        total_duration = self._data_time_max - self._data_time_min
-        self._min_time_range = max(0.001, total_duration / 2**16)
-        
-        # Get current selection to estimate y bounds
-        try:
-            ds_kwargs = self.app_state.get_ds_kwargs()
-            if hasattr(self.app_state, 'features_sel') and self.app_state.features_sel:
-                var = self.app_state.ds[self.app_state.features_sel]
-                data, _ = sel_valid(var, ds_kwargs)
-                if data.size > 0:
-                    self._data_y_min = float(np.nanmin(data))
-                    self._data_y_max = float(np.nanmax(data))
-                else:
-                    self._data_y_min = -1.0
-                    self._data_y_max = 1.0
-            else:
-                self._data_y_min = -1.0
-                self._data_y_max = 1.0
-        except:
-            self._data_y_min = -1.0
-            self._data_y_max = 1.0
-            
-        # Apply zoom constraints to viewbox
-        self._apply_zoom_constraints()
-    
     def _apply_zoom_constraints(self):
         """Apply data-aware zoom constraints to the plot viewbox."""
-        if (self._data_time_min is None or self._data_time_max is None or 
-            self._data_y_min is None or self._data_y_max is None):
-            return
+
+        self.vb.enableAutoRange()
+        self.vb.autoRange()
+        
+   
+        x_range, y_range = self.vb.viewRange()
+        
+        self._data_time_min, self._data_time_max = x_range
+        self._data_y_min, self._data_y_max = y_range
             
         # Set time axis limits with small buffer
         time_buffer = (self._data_time_max - self._data_time_min) * 0.01
@@ -214,6 +192,69 @@ class IntegratedLinePlot(QWidget):
                 maxYRange=y_range + 2*y_buffer
             )
 
+            
+
+    def set_axes_locked(self):
+        """Enable or disable axes locking to prevent zoom but allow panning."""
+        locked = self.app_state.lock_axes
+        
+        if locked:
+            current_xlim = self.vb.viewRange()[0]
+            current_ylim = self.vb.viewRange()[1] 
+            x_range = current_xlim[1] - current_xlim[0]
+            
+
+            # Set fixed x-range and allow horizontal panning only
+            self.vb.setLimits(minXRange=x_range, maxXRange=x_range,
+                            yMin=current_ylim[0], yMax=current_ylim[1])
+
+
+            self.vb.setMouseEnabled(x=True, y=False)
+            self.vb.setMenuEnabled(False)
+        else:
+            
+            # Don't set xlim/ylim but set data-aware zoom constraints
+            self._apply_zoom_constraints()
+            
+            
+            self.vb.setMouseEnabled(x=True, y=True)
+            self.vb.setMenuEnabled(True)
+
+    def set_plots_widget(self, plots_widget):
+        """Set reference to plots widget for updating controls."""
+        self.plots_widget = plots_widget
+    
+    def _on_viewbox_range_changed(self, vb, range_info):
+        """Update plot controls when viewbox range changes."""
+        if not self.plots_widget or not self.axes_listening:
+            return
+            
+        x_range, y_range = range_info
+        xmin, xmax = x_range
+        ymin, ymax = y_range
+        window_size = xmax - xmin
+        
+        # Update the controls without triggering their signals
+        # Block signals to prevent infinite loops
+        self.plots_widget.ymin_edit.blockSignals(True)
+        self.plots_widget.ymax_edit.blockSignals(True) 
+        self.plots_widget.window_s_edit.blockSignals(True)
+        
+        # Update values
+        self.plots_widget.ymin_edit.setText(f"{ymin:.6f}")
+        self.plots_widget.ymax_edit.setText(f"{ymax:.6f}")
+        self.plots_widget.window_s_edit.setText(f"{window_size:.6f}")
+        
+        # Update app_state as well
+        self.app_state.ymin = ymin
+        self.app_state.ymax = ymax
+        self.app_state.window_size = float(window_size)
+        
+        # Unblock signals
+        self.plots_widget.ymin_edit.blockSignals(False)
+        self.plots_widget.ymax_edit.blockSignals(False)
+        self.plots_widget.window_s_edit.blockSignals(False)
+
     
     def update_plot(self, t0: Optional[float] = None, 
                    t1: Optional[float] = None) -> None:
@@ -221,11 +262,9 @@ class IntegratedLinePlot(QWidget):
         if not hasattr(self.app_state, 'ds'):
             return
         
-        # Update data bounds for zoom constraints
-        self._update_data_bounds()
-        
         # Clear previous plot items
-        clear_plot_items(self.plot_item, self.plot_items)
+        clear_plot_items(self.plot_item, self.plot_items)  
+
         
         # Get data and plot
         ds_kwargs = self.app_state.get_ds_kwargs()
@@ -242,6 +281,9 @@ class IntegratedLinePlot(QWidget):
             self.app_state.features_sel,
             color_variable=color_var
         )
+    
+        
+        
         if self.app_state.sync_state == "pyav_stream_mode":
             self._update_window_position()
         else:
@@ -252,6 +294,11 @@ class IntegratedLinePlot(QWidget):
             apply_view_settings(self.plot_item, self.app_state, preserve_xlim)
             # Update dynamic mode settings in case playback state changed
             self.set_label_mode()
+
+
+
+        self.set_axes_locked()
+    
 
 
 

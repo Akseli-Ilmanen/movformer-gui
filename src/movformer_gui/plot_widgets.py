@@ -43,6 +43,7 @@ class PlotsWidget(QWidget):
         self.window_s_edit = QLineEdit()
         self.audio_buffer_edit = QLineEdit()
         self.spec_buffer_edit = QLineEdit()
+        self.lock_axes_checkbox = QCheckBox("Lock Axes")
 
         # Arrange controls in pairs (2 columns)
         # Row 0: Y min/max (lineplot)
@@ -59,6 +60,7 @@ class PlotsWidget(QWidget):
         
         layout.addWidget(QLabel("Window size (s):"), 2, 0)
         layout.addWidget(self.window_s_edit, 2, 1)
+        layout.addWidget(self.lock_axes_checkbox, 2, 2)
         
         
         # Row 3: Audio buffer / Spectrogram buffer
@@ -76,6 +78,8 @@ class PlotsWidget(QWidget):
         self.window_s_edit.editingFinished.connect(self._on_edited)
         self.audio_buffer_edit.editingFinished.connect(self._on_edited)
         self.spec_buffer_edit.editingFinished.connect(self._on_edited)
+        
+        self.lock_axes_checkbox.toggled.connect(self._on_lock_axes_toggled)
 
         
         # Load initial settings
@@ -85,6 +89,9 @@ class PlotsWidget(QWidget):
     def set_lineplot(self, lineplot):
         """Set reference to lineplot widget."""
         self.lineplot = lineplot
+        # Set reverse reference so lineplot can update our controls
+        if hasattr(lineplot, 'set_plots_widget'):
+            lineplot.set_plots_widget(self)
 
 
 
@@ -104,6 +111,10 @@ class PlotsWidget(QWidget):
                 value = self.app_state.get_with_default(attr)
                 setattr(self.app_state, attr, value)
             edit.setText("" if value is None else str(value))
+        
+        # Restore lock axes checkbox state
+        lock_axes = self.app_state.get_with_default("lock_axes")
+        self.lock_axes_checkbox.setChecked(lock_axes)
 
     def _parse_float(self, text: str) -> Optional[float]:
         """Parse float from text input."""
@@ -117,6 +128,15 @@ class PlotsWidget(QWidget):
 
     def _on_edited(self):
         """Handle user edits to input fields."""
+        if not self.lineplot:
+            return
+        
+        self.lock_axes_checkbox.setChecked(False)
+        self.lineplot.axes_listening = False
+
+ 
+        
+        
         edits = {
             "ymin": self.ymin_edit,
             "ymax": self.ymax_edit,
@@ -159,7 +179,9 @@ class PlotsWidget(QWidget):
                     )
                     
                 self.lineplot._update_window_size()
-                    
+                
+
+        self.lineplot.axes_listening = True
 
     def _reset_to_defaults(self):
         """Reset all plot values to defaults."""
@@ -177,10 +199,21 @@ class PlotsWidget(QWidget):
             if self.app_state is not None:
                 setattr(self.app_state, attr, value)
         
+        # Reset lock axes checkbox
+        self.lock_axes_checkbox.setChecked(False)
+        self.app_state.lock_axes = False
+        
         self._on_edited()
 
+    def _on_lock_axes_toggled(self, checked: bool):
+        """Handle lock axes checkbox toggle."""
+        self.app_state.lock_axes = checked
+        
+        # Inform lineplot about the lock state change
+        if hasattr(self.lineplot, 'set_axes_locked'):
+            self.lineplot.set_axes_locked()
+
     # --- Shortcut methods (only work in napari_video_mode) ---
-    
     def _check_interactive_mode(self) -> bool:
         """Check if we're in interactive mode."""
         return getattr(self.app_state, 'sync_state', '') == 'napari_video_mode'
