@@ -91,9 +91,11 @@ class NapariVideoSync(VideoSync):
         self.qt_viewer = getattr(viewer.window, '_qt_viewer', None)
         self.video_layer = None
         
+        self._audio_player: Optional[PlayAudio] = None
+        
         self.stop_playback_signal.connect(self.stop)
         self._monitor_timer = QTimer()
-        self._player: Optional[PlayAudio] = None
+
         self._monitor_end_frame = 0
         
         self._setup_video_layer()
@@ -146,7 +148,7 @@ class NapariVideoSync(VideoSync):
     
     def start(self):
         if not self._napari_is_playing():
-            self.qt_viewer.dims.play()
+            self.qt_viewer.dims.play(fps=self.fps_playback)
 
     def resume(self):
         self.start()
@@ -178,8 +180,8 @@ class NapariVideoSync(VideoSync):
             slow_down_factor = self.fps_playback / self.fps
             rate = slow_down_factor * self.sr
             
-            self._player = PlayAudio()
-            self._player.play(data=segment, rate=float(rate), blocking=False)
+            self._audio_player = PlayAudio()
+            self._audio_player.play(data=segment, rate=float(rate), blocking=False)
 
         frame_time = 1.0 / self.fps_playback
         self.qt_viewer.dims.play(axis=0, fps=self.fps_playback)
@@ -188,20 +190,20 @@ class NapariVideoSync(VideoSync):
             if not _get_current_play_status(self.qt_viewer):
                 self._monitor_timer.stop()
           
-                if self._monitor_player:
-                    self._player.stop()
-                    self._player.__exit__(None, None, None)
-                    del self._monitor_player
+                if self._audio_player:
+                    self._audio_player.stop()
+                    self._audio_player.__exit__(None, None, None)
+                    del self._audio_player
                 return
                 
             if self.app_state.current_frame >= self._monitor_end_frame:
                 self._monitor_timer.stop()
                 self.stop_playback_signal.emit()
  
-                if self._player:
-                    self._player.stop()
-                    self._player.__exit__(None, None, None)
-                    del self._monitor_player
+                if self._audio_player:
+                    self._audio_player.stop()
+                    self._audio_player.__exit__(None, None, None)
+                    del self._audio_player
         
         self._monitor_timer.timeout.connect(check_playback)
         self._monitor_timer.start(int(frame_time * 50))
