@@ -1,4 +1,5 @@
 """Widget for labeling segments in movement data."""
+from distinctipy import name
 import xarray as xr
 import threading
 import shutil
@@ -29,6 +30,7 @@ from qtpy.QtWidgets import (
 from movformer.features.changepoints import snap_to_nearest_changepoint
 from movformer.utils.labels import load_motif_mapping
 from movformer.utils.xr_utils import sel_valid
+import time
 
 
 class LabelsWidget(QWidget):
@@ -64,7 +66,6 @@ class LabelsWidget(QWidget):
         
         # Frame tracking for motif display
         self.previous_frame: int | None = None
-        self.current_motif_layer_name = "current_motif_display"
 
 
         # UI components
@@ -485,6 +486,9 @@ class LabelsWidget(QWidget):
    
             time_data = self.app_state.ds.time.values
             self.plot_all_motifs(time_data, labels)
+            
+            # Refresh the shapes layer to show updated motifs
+            self.refresh_motif_shapes_layer()
 
     def _delete_motif(self):
         with self._disable_sync_during_labeling():
@@ -516,6 +520,9 @@ class LabelsWidget(QWidget):
     
             time_data = self.app_state.ds.time.values
             self.plot_all_motifs(time_data, labels)
+            
+            # Refresh the shapes layer to show updated motifs
+            self.refresh_motif_shapes_layer()
 
     def _edit_motif(self):
         """Enter edit mode for adjusting motif boundaries."""
@@ -584,82 +591,104 @@ class LabelsWidget(QWidget):
 
         show_info(f"✅ File saved successfully: {nc_path.name}")
 
-    def sync_frame_changed(self, current_frame: int):
-        """Called when the current frame changes - check if motif has changed and update display."""
-        # Skip if this is the same frame as before
-        if self.previous_frame == current_frame:
-            return
-            
-        # Get current data from app_state
-        ds_kwargs = self.app_state.get_ds_kwargs()
-        labels, filt_kwargs = sel_valid(self.app_state.ds.labels, ds_kwargs)
-        
-        # Get the label at the current frame
-        if current_frame < len(labels):
-            current_label = int(labels[current_frame])
-        else:
-            current_label = 0
-            
-        # Check if label changed from previous frame
-        previous_label = 0
-        if self.previous_frame is not None and self.previous_frame < len(labels):
-            previous_label = int(labels[self.previous_frame])
-            
-        # If the label changed, update the display
-        if current_label != previous_label:
-            self.display_motif_name(current_label)
-            
-        # Update previous frame
-        self.previous_frame = current_frame
+  
 
-    def display_motif_name(self, motif_id: int):
-        """Display the current motif name in a napari text layer at the top-right corner."""
-        # Remove existing motif display layer if it exists
-        if self.current_motif_layer_name in self.viewer.layers:
-            self.viewer.layers.remove(self.current_motif_layer_name)
+
+
+
+    def _add_motif_shapes_layer(self):
+        """Add single box overlay with dynamically updating text."""
+        start_time = time.perf_counter()
         
-        # If motif_id is 0 (background) or not in mappings, don't display anything
-        if motif_id == 0 or motif_id not in self.motif_mappings:
-            return
-            
-        # Get motif data
-        motif_data = self.motif_mappings[motif_id]
-        motif_name = motif_data["name"]
-        color = motif_data["color"]
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        labels, _ = sel_valid(self.app_state.ds.labels, ds_kwargs)
         
-        # Convert color to RGB values (0-255)
-        color_rgb = [int(c * 255) for c in color]
+        try:
+            layer = self.viewer.layers[0]
+            _, height, width = layer.data.shape[:3]
+        except (IndexError, AttributeError):
+            print("No video layer found for motif shapes overlay.")
+            return None
         
-        # Create a small text layer positioned at top-right
-        # We'll use a single point with text to display the motif name
-        # Position it in the top-right area of the canvas
-        canvas_shape = self.viewer.canvas.size
-        if canvas_shape is not None:
-            # Position near top-right corner
-            x_pos = canvas_shape[0] * 0.85  # 85% from left
-            y_pos = canvas_shape[1] * 0.05  # 5% from top
-        else:
-            # Fallback position
-            x_pos, y_pos = 100, 20
-            
-        # Create text layer with white background and colored text
-        text_layer = self.viewer.add_points(
-            [[y_pos, x_pos]],  # napari uses (y, x) coordinate system
-            name=self.current_motif_layer_name,
-            size=0,  # Make points invisible
+        box_width, box_height = 180, 50
+        x = width - box_width - 5
+        y = 5
+        
+
+        rect = np.array([[[y, x],
+                        [y, x + box_width],
+                        [y + box_height, x + box_width],
+                        [y + box_height, x]]])
+        
+
+        labels_array = np.asarray(labels)
+        frame_to_text = {}
+        frame_to_color = {}
+        
+        for idx, label in enumerate(labels_array):
+            if label in self.motif_mappings:
+                if label == 0:
+                    frame_to_text[idx] = ""
+                else:
+                    frame_to_text[idx] = self.motif_mappings[label]["name"]
+                
+                color = self.motif_mappings[label]["color"]
+                frame_to_color[idx] = color.tolist() if hasattr(color, 'tolist') else list(color)
+        
+
+        t_before_shapes = time.perf_counter()
+        shapes_layer = self.viewer.add_shapes(
+            rect,
+            shape_type='rectangle',
+            name="motif_labels",
             face_color='white',
-            edge_color='white',
-            opacity=0.9
+            edge_color='black',
+            edge_width=2,
+            opacity=0.9,
+            text={'string': [''], 'color': [[0, 0, 0]], 'size': 20, 'anchor': 'center'}
         )
+        t_after_shapes = time.perf_counter()
         
-        # Add text properties
-        text_layer.text = {
-            'string': f" {motif_name} ",
-            'size': 16,
-            'color': color_rgb + [255],  # Add alpha channel
-            'anchor': 'upper_right',
-            'translation': [-10, -10]  # Small offset from corner
+        shapes_layer.z_index = 1000
+        
+
+        shapes_layer.metadata = {
+            'frame_to_text': frame_to_text,
+            'frame_to_color': frame_to_color
         }
         
-        # Ensure it's on top
-        text_layer.z_index = 1000
+    
+        def update_motif_text(event=None):
+            current_frame = self.viewer.dims.current_step[0]
+            if current_frame in frame_to_text:
+                shapes_layer.text = {
+                    'string': [frame_to_text[current_frame]],
+                    'color': [frame_to_color[current_frame]],
+                    'size': 18,
+                    'anchor': 'center'
+                }
+            else:
+                shapes_layer.text = {'string': [''], 'color': [[0, 0, 0]]}
+        
+    
+        self.viewer.dims.events.current_step.connect(update_motif_text)
+        
+    
+        update_motif_text()
+        
+        end_time = time.perf_counter()
+        print(f"_add_motif_shapes_layer: total={end_time - start_time:.3f}s, "
+            f"add_shapes={t_after_shapes - t_before_shapes:.3f}s")
+        
+        return shapes_layer
+    
+    def _remove_motif_shapes_layer(self):
+        """Remove existing motif shapes layer if it exists."""
+        if "motif_labels" in self.viewer.layers:
+            self.viewer.layers.remove("motif_labels")
+
+
+    def refresh_motif_shapes_layer(self):
+        """Refresh the entire motif shapes layer - call when labels change."""
+        self._remove_motif_shapes_layer()
+        self._add_motif_shapes_layer()

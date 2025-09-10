@@ -115,6 +115,7 @@ class NavigationWidget(QWidget):
         if self.data_widget:
             self.data_widget.update_tracking()
             self.data_widget.update_video_audio()
+            self.data_widget.update_motif_label()
             self.data_widget.update_plot()
 
     def _on_trial_changed(self):
@@ -155,7 +156,7 @@ class NavigationWidget(QWidget):
 
         if 0 <= new_idx < len(self.app_state.trials):
             new_trial = self.app_state.trials[new_idx]
-            self.app_state.trials_sel = new_trial
+            self.app_state.trials_sel = int(new_trial)
 
             # Update combo box without triggering signal
             self.trials_combo.blockSignals(True)

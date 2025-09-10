@@ -181,6 +181,7 @@ class DataWidget(DataLoader, QWidget):
 
         self.update_plot()
         self.update_video_audio()
+        self.update_motif_label()
         self.update_tracking()
 
         load_btn = self.io_widget.load_button
@@ -429,6 +430,7 @@ class DataWidget(DataLoader, QWidget):
             labels, _ = sel_valid(self.app_state.ds.labels, ds_kwargs)
 
             self.labels_widget.plot_all_motifs(time_data, labels)
+            
 
         except (KeyError, AttributeError, ValueError) as e:
             show_error(f"Error updating plot: {e}")
@@ -525,6 +527,10 @@ class DataWidget(DataLoader, QWidget):
 
         # Indirectly give other widgets acess to sync manager via app state
         self.app_state.sync_manager = self.sync_manager
+
+    def update_motif_label(self):
+        """Update motif label display."""
+        self.labels_widget.refresh_motif_shapes_layer()
 
 
 

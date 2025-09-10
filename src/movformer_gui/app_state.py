@@ -236,25 +236,22 @@ class ObservableAppState(QObject):
         for attr in self._state.saveable_attributes():
             value = getattr(self._state, attr)
             if value is not None:
-                try:
-                    if hasattr(value, "item"):
-                        value = value.item()
-                    elif hasattr(value, "dtype"):
-                        value = float(value)
-                except Exception as exc:
-                    print(f"Error converting {attr}: {exc}")
-                state_dict[attr] = value
-
+                # Only save if value is str, float, int, or bool
+                if isinstance(value, (str, float, int, bool)):
+                    state_dict[attr] = value
+        
         # Save dynamic _sel attributes
         for attr in dir(self):
             if attr.endswith("_sel") or attr.endswith("_sel_previous"):
                 try:
                     value = getattr(self, attr)
                     if not callable(value) and value is not None:
-                        state_dict[attr] = value
+                        if isinstance(value, (str, float, int, bool)):
+                            state_dict[attr] = value
                 except (AttributeError, TypeError) as exc:
                     print(f"Error accessing {attr}: {exc}")
         return state_dict
+
 
     def load_from_dict(self, state_dict: dict):
         for key, value in state_dict.items():

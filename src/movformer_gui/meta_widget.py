@@ -229,7 +229,7 @@ class MetaWidget(CollapsibleWidgetContainer):
         qwerty_row = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p']
         home_row = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';']
         control_row = ['e', 'd', 'f', 'i', 'k', 'c', 'm', 't', 'n', 'p']
-        other = ['y', 'space', 'Right', 'Left']
+        other = ['y', 'space', 'Up', 'Down']
 
         all_keys = number_keys + qwerty_row + home_row + control_row + other
         
@@ -279,13 +279,14 @@ class MetaWidget(CollapsibleWidgetContainer):
         def toggle_play_pause(v):
             self.data_widget.toggle_play_pause()
         
-
+        # In napari video, can user left, right arrow keys to go back/forward one frame
+        
         # Navigation shortcuts (avoiding conflicts with motif labeling)
-        @viewer.bind_key("Right", overwrite=True) 
+        @viewer.bind_key("Down", overwrite=True) 
         def next_trial(v):
             self.navigation_widget.next_trial()
 
-        @viewer.bind_key("Left", overwrite=True)
+        @viewer.bind_key("Up", overwrite=True)
         def prev_trial(v):
             self.navigation_widget.prev_trial()
 
