@@ -88,7 +88,6 @@ class IntegratedLinePlot(QWidget):
         self.time_marker.setZValue(1000)
 
         self.update_window_bool = True
-        self._update_window_position()
                 
 
     def set_dynamic_mode(self) -> None:

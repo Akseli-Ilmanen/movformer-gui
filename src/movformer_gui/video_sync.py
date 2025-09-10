@@ -252,7 +252,7 @@ class NapariVideoSync(VideoSync):
         
         frame_time = 1.0 / fps_playback
             
-        # Use loop mode to prevent auto-reset
+    
         self.qt_viewer.dims.play(axis=0, fps=fps_playback)
         
 
@@ -267,7 +267,7 @@ class NapariVideoSync(VideoSync):
                     self_ref.qt_viewer.dims.stop()
                     self._emit_playback_state_changed(False)
                     break
-                time.sleep(frame_time / 10) 
+                time.sleep(frame_time / 5) 
                
             # Clean up audio
             if player_ref:

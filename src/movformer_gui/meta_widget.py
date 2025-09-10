@@ -289,6 +289,10 @@ class MetaWidget(CollapsibleWidgetContainer):
         @viewer.bind_key("Up", overwrite=True)
         def prev_trial(v):
             self.navigation_widget.prev_trial()
+            
+        @viewer.bind_key("ctrl+p", overwrite=True)
+        def toggle_sync(v):
+            self.navigation_widget.toggle_sync()
 
         def setup_keybindings_grid_layout(viewer, labels_widget):
             """Setup using grid layout for motif activation"""
@@ -322,14 +326,17 @@ class MetaWidget(CollapsibleWidgetContainer):
             [21][22][23][24][25][26][27][28][29][30]  (A-; keys)
             
             Control Functions (use Shift+key):
-            Y: Edit motif
-            Shift+D: Delete motif
-            Shift+F: Toggle features
-            Shift+I: Toggle individuals
-            Shift+K: Toggle keypoints
-            Shift+C: Toggle cameras
-            Shift+M: Toggle mics
-            Shift+T: Toggle tracking
+            up/Down: Next/previous trial
+            Space: Play/pause video and audio
+            Ctrl+P: Toggle playback mode
+            Ctrl+E: Edit motif
+            Ctrl+D: Delete motif
+            Ctrl+F: Toggle features
+            Ctrl+I: Toggle individuals
+            Ctrl+K: Toggle keypoints
+            Ctrl+C: Toggle cameras
+            Ctrl+M: Toggle mics
+            Ctrl+T: Toggle tracking
             """)
 
         # Call the setup function

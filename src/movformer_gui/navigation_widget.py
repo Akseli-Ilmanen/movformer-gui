@@ -34,7 +34,8 @@ class NavigationWidget(QWidget):
         # Playback FPS control
         self.fps_playback_edit = QLineEdit()
         self.fps_playback_edit.setObjectName("fps_playback_edit")
-        self.fps_playback_edit.setText(str(app_state.get_with_default("fps_playback")))
+        fps_playback = app_state.get_with_default("fps_playback")
+        self.fps_playback_edit.setText(str(fps_playback))
         self.fps_playback_edit.editingFinished.connect(self._on_fps_changed)
         fps_label = QLabel("Playback FPS:")
         fps_label.setObjectName("fps_label")
@@ -113,6 +114,7 @@ class NavigationWidget(QWidget):
     def _trial_change_consequences(self):
         """Handle consequences of trial changes."""
         if self.data_widget:
+            self.app_state.current_frame = 0
             self.data_widget.update_tracking()
             self.data_widget.update_video_audio()
             self.data_widget.update_motif_label()
