@@ -106,6 +106,10 @@ class VideoSync(QObject):
 class NapariVideoSync(VideoSync):
     """Napari-integrated video player using napari-video plugin."""
     
+    # Add internal signals for thread-safe communication
+    _frame_update_signal = Signal(int)
+    _window_reset_signal = Signal(int)
+    
     def __init__(self, viewer: napari.Viewer, app_state, video_source: str, audio_source: Optional[str] = None):
         super().__init__(viewer, app_state, video_source, audio_source)
         
@@ -115,6 +119,16 @@ class NapariVideoSync(VideoSync):
         # Video layer reference
         self.video_layer = None
         self.jump_frame = None
+        
+        # Connect internal signals to main thread handlers with queued connections
+        self._frame_update_signal.connect(
+            self._handle_frame_update_main_thread, 
+            Qt.ConnectionType.QueuedConnection
+        )
+        self._window_reset_signal.connect(
+            self._handle_window_reset_main_thread,
+            Qt.ConnectionType.QueuedConnection
+        )
         
         self._setup_video_layer()
     
@@ -147,14 +161,33 @@ class NapariVideoSync(VideoSync):
         self.viewer.dims.events.current_step.connect(self._on_napari_step_change)
     
     def _on_napari_step_change(self, event=None):
-        """Handle napari dimension step changes and emit frame_changed signal."""
+        """Handle napari dimension step changes - THREAD SAFE VERSION."""
         if hasattr(self.viewer.dims, 'current_step') and len(self.viewer.dims.current_step) > 0:
             frame_number = self.viewer.dims.current_step[0]
             
-            # Check if we need to reset lineplot window when user seeks outside current range
-            self._check_and_reset_lineplot_window(frame_number)
+            # Emit signals to queue operations to main thread instead of direct UI calls
+            self._frame_update_signal.emit(frame_number)
             
-            self._emit_frame_changed(frame_number)
+            # Check if window reset needed (no UI operations in this thread)
+            if self._should_reset_window(frame_number):
+                self._window_reset_signal.emit(frame_number)
+    
+    def _should_reset_window(self, frame_number: int) -> bool:
+        """Quick check if window reset is needed - SAFE for animation thread."""
+        if not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
+            return False
+            
+        current_time = frame_number / self.fps
+        lineplot_widget = getattr(self.app_state, 'lineplot_widget', None)
+        
+        if lineplot_widget and hasattr(lineplot_widget, 'vb'):
+            try:
+                current_range = lineplot_widget.vb.viewRange()[0]  # [xmin, xmax]
+                xmin, xmax = current_range
+                return current_time < xmin or current_time > xmax
+            except:
+                return False
+        return False
     
     def _check_and_reset_lineplot_window(self, frame_number: int):
         """Check if frame is outside current lineplot window and reset if needed."""
@@ -185,6 +218,16 @@ class NapariVideoSync(VideoSync):
                         lineplot_widget.update_window_bool = True
                         lineplot_widget._update_window_position()
                         lineplot_widget.update_window_bool = old_update_bool
+    
+    @Slot(int)
+    def _handle_frame_update_main_thread(self, frame_number: int):
+        """Handle frame updates on main thread - SAFE for UI operations."""
+        self._emit_frame_changed(frame_number)
+    
+    @Slot(int)
+    def _handle_window_reset_main_thread(self, frame_number: int):
+        """Handle window resets on main thread - SAFE for UI operations."""
+        self._check_and_reset_lineplot_window(frame_number)
     
     def _napari_is_playing(self) -> bool:
         """Check if napari is currently playing using internal functions."""
