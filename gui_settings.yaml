@@ -1,21 +1,21 @@
-lock_axes: false
-vmin_db: -120.0
-video_path: D:\Alice\VidData\20250309_01_Ivy\2025-03-09_013_Ivy-cam-2.mp4
-recompute_threshold: 0.5
-video_folder: D:/Alice/VidData/20250309_01_Ivy
-hop_frac: 0.5
-fps_playback: 100.0
 nc_file_path: D:/Alice/AK_data/derivatives/sub-01_id-Ivy/ses-000_date-20250309_01/behav/Trial_data.nc
-vmax_db: 20.0
-window_size: 5.0
+recompute_threshold: 0.5
+vmin_db: -120.0
 ymax: 100.0
+fps_playback: 100.0
+window_size: 2.0
 buffer_multiplier: 5.0
-space_plot_type: Layer controls
-ymin: 0.0
-video_buffer_size: 300
 plot_spectrogram: false
 cmap: magma
+lock_axes: false
+video_path: D:\Alice\VidData\20250309_01_Ivy\2025-03-09_008_Ivy-cam-2.mp4
+video_buffer_size: 300
+space_plot_type: Layer controls
+video_folder: D:/Alice/VidData/20250309_01_Ivy
+hop_frac: 0.5
 nfft: 1024
+vmax_db: 20.0
+ymin: 0.0
 cameras_sel: cam2_files
 colors_sel: angle_rgb
 features_sel: speed
@@ -25,4 +25,4 @@ individuals_sel_previous: Poppy
 keypoints_sel: beakTip
 keypoints_sel_previous: stickTip
 trial_conditions_sel: None
-trials_sel: 13
+trials_sel: 8

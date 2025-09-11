@@ -210,14 +210,17 @@ class LinePlot(QWidget):
     
         feature_sel = self.app_state.features_sel
         ds_kwargs = self.app_state.get_ds_kwargs()
+
+        
         data, _ = sel_valid(self.app_state.ds[feature_sel], ds_kwargs)
        
-        # Excluding leading and trailing NaNs for time axis limits, find xmin/xmax
-        time_dim = int(np.argmax(data.shape))
-        data = interpolate_nans(data, axis=time_dim)
-        if data.ndim > 1:
+        # Excluding leading and trailing NaNs for time axis limits, find xmin/xmax        
+        data = interpolate_nans(data, axis=0)
+        
+        
+        if data.ndim == 2:
             valid_indices = np.where(np.any(data != 0, axis=1))[0]
-        else:
+        elif data.ndim == 1:
             valid_indices = np.nonzero(data)[0]
             
         xMinIdx = valid_indices[0]

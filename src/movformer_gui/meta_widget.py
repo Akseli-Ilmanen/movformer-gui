@@ -305,10 +305,9 @@ class MetaWidget(CollapsibleWidgetContainer):
             next_index = (current_index + 1) % total_options
             self.navigation_widget.sync_toggle_btn.setCurrentIndex(next_index)
             
-        @viewer.bind_key("ctrl+l", overwrite=True)
-        def toggle_lock_axes(v):
-            current_boolean = self.plots_widget.lock_axes_checkbox.isChecked()
-            self.plots_widget.lock_axes_checkbox.setChecked(not current_boolean)
+        @viewer.bind_key("ctrl+a", overwrite=True)
+        def apply_changes(v):
+            self.plots_widget.apply_button.setEnabled(True)
 
 
         def setup_keybindings_grid_layout(viewer, labels_widget):
