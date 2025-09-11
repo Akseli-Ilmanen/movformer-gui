@@ -12,6 +12,7 @@ from src.movformer_gui.plot_utils import (
     apply_view_settings,
     get_motif_colours
 )
+from movformer.features.preprocessing import interpolate_nans
 
 class LinePlot(QWidget):
     """Main line plot widget with video-sync capabilities.
@@ -54,9 +55,7 @@ class LinePlot(QWidget):
         # Connect click handler for interactive functionality
         self.plot_widget.scene().sigMouseClicked.connect(self._handle_click)
         
-        # Connect viewbox range change signal to update plot controls
-        self.vb.sigRangeChanged.connect(self._on_viewbox_range_changed)
-        
+
   
         
         # Data bounds for smart zoom constraints
@@ -69,9 +68,8 @@ class LinePlot(QWidget):
 
         # Store interaction state
         self._interaction_enabled = True
-        self._last_window_center = None   
-        
-        self.axes_listening = True
+
+  
         
         
         # Reference to plots widget for updating controls
@@ -87,14 +85,9 @@ class LinePlot(QWidget):
         - Plot clicks are disabled
         """
         self._interaction_enabled = False
-        
-
         self.vb.setMouseEnabled(x=False, y=False)
-        
-
         self.time_marker.setPen(pg.mkPen(color='r', width=3, style=pg.QtCore.Qt.SolidLine))
         self.time_marker.setZValue(1000)
-
         self.app_state.lock_axes = True
                 
 
@@ -104,158 +97,11 @@ class LinePlot(QWidget):
 
         self._interaction_enabled = True
         self.vb.setMouseEnabled(x=True, y=True)
-        
-   
         self.time_marker.setPen(pg.mkPen(color='r', width=1, style=pg.QtCore.Qt.DashLine))
         self.time_marker.show()
         self.time_marker.setZValue(100)
 
 
-        
-    def _update_window_position(self) -> None:
-        """Update window position to follow video when appropriate."""
-        if not hasattr(self.app_state, 'current_frame') or not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
-            return
-            
-        current_time = self.app_state.current_frame / self.app_state.ds.fps
-        
-        self._update_window_size()
-        
-        # Apply y-axis limits from settings
-        y_min = self.app_state.get_with_default('ymin')
-        y_max = self.app_state.get_with_default('ymax')
-        
-        # Update view range without triggering signals
-        if y_min is not None and y_max is not None:
-            self.vb.setRange(yRange=(y_min, y_max), padding=0)
-
-
-        # Update time marker position and ensure visibility
-        self.time_marker.setValue(current_time)
-        self.time_marker.show()
-        
-        # Ensure marker is on top
-        self.time_marker.setZValue(1000)
-        
-        # Store for reference
-        self._last_window_center = current_time
-        
-        
-    def _update_window_size(self) -> None:
-        """Set window size by a multiplicative factor."""
-        if not hasattr(self.app_state, 'window_size'):
-            return
-
-        current_time = self.app_state.current_frame / self.app_state.ds.fps
-        window_size = self.app_state.get_with_default('window_size')
-        
-        # Calculate window bounds centered on current time
-        half_window = window_size / 2.0
-        x_min = current_time - half_window
-        x_max = current_time + half_window
-        
-        self.vb.setRange(xRange=(x_min, x_max), padding=0)
-            
-            
-            
-        
-    def _apply_zoom_constraints(self):
-        """Apply data-aware zoom constraints to the plot viewbox."""
-
-        self.vb.enableAutoRange()
-        self.vb.autoRange()
-        
-   
-        x_range, y_range = self.vb.viewRange()
-        
-        self._data_time_min, self._data_time_max = x_range
-        self._data_y_min, self._data_y_max = y_range
-            
-        # Set time axis limits with small buffer
-        time_buffer = (self._data_time_max - self._data_time_min) * 0.01
-        self.vb.setLimits(
-            xMin=self._data_time_min - time_buffer,
-            xMax=self._data_time_max + time_buffer,
-            minXRange=self._min_time_range,
-            maxXRange=self._data_time_max - self._data_time_min + 2*time_buffer
-        )
-        
-        # Set y axis limits with buffer
-        y_range = self._data_y_max - self._data_y_min
-        if y_range > 0:
-            y_buffer = y_range * 0.1
-            min_y_range = max(y_range / 2**16, 0.001)
-            self.vb.setLimits(
-                yMin=self._data_y_min - y_buffer,
-                yMax=self._data_y_max + y_buffer,
-                minYRange=min_y_range,
-                maxYRange=y_range + 2*y_buffer
-            )
-
-            
-
-    def set_axes_locked(self):
-        """Enable or disable axes locking to prevent zoom but allow panning."""
-        locked = self.app_state.lock_axes
-        
-        if locked:
-            current_xlim = self.vb.viewRange()[0]
-            current_ylim = self.vb.viewRange()[1] 
-            x_range = current_xlim[1] - current_xlim[0]
-            
-
-            # Set fixed x-range and allow horizontal panning only
-            self.vb.setLimits(minXRange=x_range, maxXRange=x_range,
-                            yMin=current_ylim[0], yMax=current_ylim[1])
-
-
-            self.vb.setMouseEnabled(x=True, y=False)
-            self.vb.setMenuEnabled(False)
-        else:
-            
-            # Don't set xlim/ylim but set data-aware zoom constraints
-            self._apply_zoom_constraints()
-            
-            
-            self.vb.setMouseEnabled(x=True, y=True)
-            self.vb.setMenuEnabled(True)
-
-    def set_plots_widget(self, plots_widget):
-        """Set reference to plots widget for updating controls."""
-        self.plots_widget = plots_widget
-    
-    def _on_viewbox_range_changed(self, vb, range_info):
-        """Update plot controls when viewbox range changes."""
-        if not self.plots_widget or not self.axes_listening:
-            return
-            
-        x_range, y_range = range_info
-        xmin, xmax = x_range
-        ymin, ymax = y_range
-        window_size = xmax - xmin
-        
-        # Update the controls without triggering their signals
-        # Block signals to prevent infinite loops
-        self.plots_widget.ymin_edit.blockSignals(True)
-        self.plots_widget.ymax_edit.blockSignals(True) 
-        self.plots_widget.window_s_edit.blockSignals(True)
-        
-        # Update values
-        self.plots_widget.ymin_edit.setText(f"{ymin:.6f}")
-        self.plots_widget.ymax_edit.setText(f"{ymax:.6f}")
-        self.plots_widget.window_s_edit.setText(f"{window_size:.6f}")
-        
-        # Update app_state as well
-        self.app_state.ymin = ymin
-        self.app_state.ymax = ymax
-        self.app_state.window_size = float(window_size)
-        
-        # Unblock signals
-        self.plots_widget.ymin_edit.blockSignals(False)
-        self.plots_widget.ymax_edit.blockSignals(False)
-        self.plots_widget.window_s_edit.blockSignals(False)
-
-    
     def update_plot(self, t0: Optional[float] = None, 
                    t1: Optional[float] = None) -> None:
         """Update the line plot with current data and time window."""
@@ -297,9 +143,7 @@ class LinePlot(QWidget):
 
 
 
-        self.set_axes_locked()
-    
-
+        self.toggle_axes_lock()
 
 
     def update_yrange(self, ymin: Optional[float], 
@@ -314,6 +158,128 @@ class LinePlot(QWidget):
         if ymin is not None and ymax is not None:
             self.plot_item.setYRange(ymin, ymax)
     
+        
+    def _update_window_position(self) -> None:
+        """Update window position to follow video when appropriate."""
+        if not hasattr(self.app_state, 'current_frame') or not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
+            return
+            
+        current_time = self.app_state.current_frame / self.app_state.ds.fps
+        
+        self._update_window_size()
+        
+
+        y_min = self.app_state.get_with_default('ymin')
+        y_max = self.app_state.get_with_default('ymax')
+    
+        if y_min is not None and y_max is not None:
+            self.vb.setRange(yRange=(y_min, y_max), padding=0)
+
+
+        # Update time marker position and ensure visibility
+        self.time_marker.setValue(current_time)
+        self.time_marker.show()
+        
+        # Ensure marker is on top
+        self.time_marker.setZValue(1000)
+        
+
+
+        
+    def _update_window_size(self) -> None:
+        """Set window size by a multiplicative factor."""
+        if not hasattr(self.app_state, 'window_size'):
+            return
+
+        current_time = self.app_state.current_frame / self.app_state.ds.fps
+        window_size = self.app_state.get_with_default('window_size')
+        
+        # Calculate window bounds centered on current time
+        half_window = window_size / 2.0
+        x_min = current_time - half_window
+        x_max = current_time + half_window
+        
+        self.vb.setRange(xRange=(x_min, x_max), padding=0)
+            
+            
+            
+        
+    def _apply_zoom_constraints(self):
+        """Apply data-aware zoom constraints to the plot viewbox."""
+
+    
+        feature_sel = self.app_state.features_sel
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        data, _ = sel_valid(self.app_state.ds[feature_sel], ds_kwargs)
+       
+        # Excluding leading and trailing NaNs for time axis limits, find xmin/xmax
+        time_dim = int(np.argmax(data.shape))
+        data = interpolate_nans(data, axis=time_dim)
+        if data.ndim > 1:
+            valid_indices = np.where(np.any(data != 0, axis=1))[0]
+        else:
+            valid_indices = np.nonzero(data)[0]
+            
+        xMinIdx = valid_indices[0]
+        xMaxIdx = valid_indices[-1]
+
+        # Convert to seconds
+        time = self.app_state.ds.time.values        
+        xMin = time[xMinIdx]
+        xMax = time[xMaxIdx]
+        xRange = xMax - xMin
+        
+        self.vb.setLimits(
+            xMin=xMin - 1,
+            xMax=xMax + 1,
+            maxXRange=xRange + 1,
+        )
+        
+        y_min = np.nanpercentile(data, 0.5)
+        y_max = np.nanpercentile(data, 99.5)
+        y_range = y_max - y_min
+        y_buffer = (y_max - y_min) * 0.2
+
+        if y_range > 0:
+            self.vb.setLimits(
+                yMin=y_min - y_buffer,
+                yMax=y_max + y_buffer,
+                maxYRange=y_range + y_buffer
+            )
+
+            
+
+    def toggle_axes_lock(self):
+        """Enable or disable axes locking to prevent zoom but allow panning."""
+        locked = self.app_state.lock_axes
+        
+        if locked:
+            current_xlim = self.vb.viewRange()[0]
+            current_ylim = self.vb.viewRange()[1] 
+            x_range = current_xlim[1] - current_xlim[0]
+            
+
+            # Set fixed x-range and allow horizontal panning only
+            self.vb.setLimits(minXRange=x_range, maxXRange=x_range,
+                            yMin=current_ylim[0], yMax=current_ylim[1])
+
+
+            self.vb.setMouseEnabled(x=True, y=False)
+            self.vb.setMenuEnabled(False)
+        else:
+            
+            # Don't set xlim/ylim but set data-aware zoom constraints
+            self._apply_zoom_constraints()
+            
+            
+            self.vb.setMouseEnabled(x=True, y=True)
+            self.vb.setMenuEnabled(True)
+
+    def set_plots_widget(self, plots_widget):
+        """Set reference to plots widget for updating controls."""
+        self.plots_widget = plots_widget
+    
+ 
     
     
     def _handle_click(self, event) -> None:

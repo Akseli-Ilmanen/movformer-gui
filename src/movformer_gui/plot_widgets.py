@@ -43,7 +43,14 @@ class PlotsWidget(QWidget):
         self.window_s_edit = QLineEdit()
         self.audio_buffer_edit = QLineEdit()
         self.spec_buffer_edit = QLineEdit()
+        
+        self.apply_button = QPushButton("Apply")
+        
+        self.autoscale_checkbox = QCheckBox("Autoscale (y-axis)")
         self.lock_axes_checkbox = QCheckBox("Lock Axes")
+        
+        
+
 
         # Arrange controls in pairs (2 columns)
         # Row 0: Y min/max (lineplot)
@@ -60,15 +67,22 @@ class PlotsWidget(QWidget):
         
         layout.addWidget(QLabel("Window size (s):"), 2, 0)
         layout.addWidget(self.window_s_edit, 2, 1)
-        layout.addWidget(self.lock_axes_checkbox, 2, 2)
+
+        layout.setRowMinimumHeight(3, 10)
+
+        layout.addWidget(self.autoscale_checkbox, 4, 0)
+        layout.addWidget(self.lock_axes_checkbox, 4, 1)
+        layout.addWidget(self.apply_button, 4, 2)
+
         
-        
+        layout.setRowMinimumHeight(, 10)
+
         # Row 3: Audio buffer / Spectrogram buffer
-        layout.addWidget(QLabel("Audio buffer (s):"), 3, 0)
-        layout.addWidget(self.audio_buffer_edit, 3, 1)
-        layout.addWidget(QLabel("Spectrogram buffer (x):"), 3, 2)
-        layout.addWidget(self.spec_buffer_edit, 3, 3)
-        
+        layout.addWidget(QLabel("Audio buffer (s):"), 6, 0)
+        layout.addWidget(self.audio_buffer_edit, 6, 1)
+        layout.addWidget(QLabel("Spectrogram buffer (x):"), 6, 2)
+        layout.addWidget(self.spec_buffer_edit, 6, 3)
+
 
         # Connect edit signals
         self.ymin_edit.editingFinished.connect(self._on_edited)
@@ -79,6 +93,8 @@ class PlotsWidget(QWidget):
         self.audio_buffer_edit.editingFinished.connect(self._on_edited)
         self.spec_buffer_edit.editingFinished.connect(self._on_edited)
         
+        self.apply_button.clicked.connect(self._on_edited)
+        self.autoscale_checkbox.toggled.connect(self._autoscale_y_toggle)
         self.lock_axes_checkbox.toggled.connect(self._on_lock_axes_toggled)
 
         
@@ -125,6 +141,25 @@ class PlotsWidget(QWidget):
             return float(s)
         except ValueError:
             return None
+        
+    def _autoscale_y_toggle(self, checked: bool):
+        """Autoscale y-axis based on current data."""
+        if not self.lineplot:
+            return
+
+        if checked:
+            self.lineplot.vb.enableAutoRange(x=False, y=True)
+            self.lock_axes_checkbox.setChecked(False)
+        else:
+            self.lineplot.vb.disableAutoRange()
+
+    def _on_lock_axes_toggled(self, checked: bool):
+        """Handle lock axes checkbox toggle."""
+        self.app_state.lock_axes = checked
+        self.lineplot.toggle_axes_lock()
+        if checked:
+            self.autoscale_checkbox.setChecked(False)
+        
 
     def _on_edited(self):
         """Handle user edits to input fields."""
@@ -132,10 +167,7 @@ class PlotsWidget(QWidget):
             return
         
         self.lock_axes_checkbox.setChecked(False)
-        self.lineplot.axes_listening = False
-
  
-        
         
         edits = {
             "ymin": self.ymin_edit,
@@ -156,32 +188,22 @@ class PlotsWidget(QWidget):
             if self.app_state is not None:
                 setattr(self.app_state, attr, val)
 
-        # Update plot if available
-        if self.lineplot is not None:
-            sync_state = getattr(self.app_state, 'sync_state', 'napari_video_mode')
-            
-            if sync_state == "pyav_stream_mode":
-                # In stream mode, changes will be applied automatically
-                # by the lineplot's update timer
-                pass
-            else:
-                # In interactive mode, apply changes immediately
-                is_spectrogram = getattr(self.app_state, "plot_spectrogram", False)
-                if is_spectrogram:
-                    self.lineplot.update_yrange(
-                        values["spec_ymin"], 
-                        values["spec_ymax"], 
-                    )
-                else:
-                    self.lineplot.update_yrange(
-                        values["ymin"], 
-                        values["ymax"], 
-                    )
-                    
-                self.lineplot._update_window_size()
-                
 
-        self.lineplot.axes_listening = True
+        is_spectrogram = getattr(self.app_state, "plot_spectrogram", False)
+        if is_spectrogram:
+            self.lineplot.update_yrange(
+                values["spec_ymin"], 
+                values["spec_ymax"], 
+            )
+        else:
+            self.lineplot.update_yrange(
+                values["ymin"], 
+                values["ymax"], 
+            )
+            
+        self.lineplot._update_window_size()
+            
+
 
     def _reset_to_defaults(self):
         """Reset all plot values to defaults."""
@@ -205,13 +227,7 @@ class PlotsWidget(QWidget):
         
         self._on_edited()
 
-    def _on_lock_axes_toggled(self, checked: bool):
-        """Handle lock axes checkbox toggle."""
-        self.app_state.lock_axes = checked
-        
-        # Inform lineplot about the lock state change
-        if hasattr(self.lineplot, 'set_axes_locked'):
-            self.lineplot.set_axes_locked()
+
 
     # --- Shortcut methods (only work in napari_video_mode) ---
     def _check_interactive_mode(self) -> bool:
