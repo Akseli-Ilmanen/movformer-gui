@@ -1,3 +1,5 @@
+from qtpy.QtWidgets import QCheckBox
+
 """Widget for input/output controls and data loading."""
 
 from qtpy.QtWidgets import (
@@ -123,7 +125,14 @@ class IOWidget(QWidget):
             self.layout().addRow("Cameras:", combo)
             self.combos['cameras'] = combo
             self.controls.append(combo)
+            
+        # Add a checkbox to flip video vertically
+        self.flip_video_checkbox = QCheckBox("Flip video vertically")
+        self.flip_video_checkbox.setObjectName("flip_video_checkbox")
+        self.layout().addRow(self.flip_video_checkbox)
+        self.controls.append(self.flip_video_checkbox)
 
+  
         # Create mics combo
         if "mics" in type_vars_dict.keys():
             self._create_combo_widget("mics", type_vars_dict["mics"])

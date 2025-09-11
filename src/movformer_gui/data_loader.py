@@ -105,28 +105,29 @@ def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
     # Validate types against allowed keys
     allowed_keys = ['trials', 'keypoints', 'individuals', 'features', 'colors', 'trial_conditions', 'cameras', 'mics']
     invalid_types = [t for t in name_info.keys() if t not in allowed_keys]
-    # Check for required keys
-    required_keys = ['trials', 'features', 'cameras']
+    # Remove invalid types from name_info instead of erroring
+    for invalid_type in invalid_types:
+        del name_info[invalid_type]
+    # Auto-assign types for common variables if not specified
+    if 'features' not in name_info:
+        # Auto-detect feature variables based on common names
+        feature_candidates = ['position', 'velocity', 'confidence', 'speed', 'acceleration']
+        auto_features = [var for var in ds.data_vars if any(candidate in var.lower() for candidate in feature_candidates)]
+        if auto_features:
+            name_info['features'] = auto_features
+            
+    if 'cameras' not in name_info:
+        # Auto-detect camera variables based on common names
+        camera_candidates = [var for var in ds.data_vars if var.startswith(('cam', 'video')) and var not in ['labels']]
+        if camera_candidates:
+            name_info['cameras'] = camera_candidates
+    
+    # Check for required keys after auto-assignment
+    required_keys = ['trials', 'features']  # Remove 'cameras' from required since not all datasets have them
     missing_required = [k for k in required_keys if k not in name_info]
     if missing_required:
         show_error(f"Dataset missing required types: {missing_required}. Please specify these types for your variables/coordinates.")
-    if invalid_types:
-        error_msg = (
-            f"Invalid types found in dataset: {invalid_types}. "
-            f"Allowed types are: {allowed_keys}. "
-            "Please specify types for your variables and coordinates, e.g.:\n"
-            '    ds["pos"].attrs["type"] = "features"\n'
-            '    ds["vel"].attrs["type"] = "features"\n'
-            '    ds["speed"].attrs["type"] = "features"\n'
-            '    ds["angle_rgb"].attrs["type"] = "colors"\n'
-            '    ds["poscat"].attrs["type"] = "trial_conditions"\n'
-            '    ds["num_pellets"].attrs["type"] = "trial_conditions"\n'
-            '    ds["cam1_files"].attrs["type"] = "cameras"\n'
-            '    ds["cam2_files"].attrs["type"] = "cameras"\n'
-            '    ds["mic1_files"].attrs["type"] = "mics"\n'
-            '    ds["mic2_files"].attrs["type"] = "mics"\n'
-        )
-        show_error(error_msg)
+    # invalid_types are now handled by removal above, no need to error
 
     # Perform comprehensive data type validation
     if not validate_dataset_types(ds, data_info):
