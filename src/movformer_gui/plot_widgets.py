@@ -75,7 +75,7 @@ class PlotsWidget(QWidget):
         layout.addWidget(self.apply_button, 4, 2)
 
         
-        layout.setRowMinimumHeight(, 10)
+        layout.setRowMinimumHeight(5, 10)
 
         # Row 3: Audio buffer / Spectrogram buffer
         layout.addWidget(QLabel("Audio buffer (s):"), 6, 0)
