@@ -73,6 +73,8 @@ class DataWidget(DataLoader, QWidget):
         self.app_state.audio_video_sync = None
         # E.g. {keypoints = ["beakTip, StickTip"], trials=[1, 2, 3, 4], ...}
         self.type_vars_dict = {}  # Gets filled by load_dataset
+        
+        
 
     def set_references(self, lineplot, labels_widget, plots_widget, navigation_widget):
         """Set references to other widgets after creation."""
@@ -208,6 +210,8 @@ class DataWidget(DataLoader, QWidget):
 
         # Create device combos in IOWidget
         self.io_widget.create_device_controls(self.type_vars_dict)
+        self.io_widget.flip_video_checkbox.stateChanged.connect(self.update_video_audio)
+    
 
         # Add spectrogram checkbox
         self.plot_spec_checkbox = QCheckBox("Plot spectrogram")
@@ -219,7 +223,14 @@ class DataWidget(DataLoader, QWidget):
         # Add space plot combo
         self.space_plot_combo = QComboBox()
         self.space_plot_combo.setObjectName("space_plot_combo")
-        self.space_plot_combo.addItems(["Layer controls", "plot_box_topview", "plot_centroid_trajectory"])
+        
+        # Crow lab only
+        if 'angle_rgb' in self.app_state.ds.data_vars:
+            self.space_plot_combo.addItems(["Layer controls", "plot_box_topview", "plot_centroid_trajectory"])
+        else:
+            self.space_plot_combo.addItems(["Layer controls", "plot_centroid_trajectory"])
+        
+        
         self.space_plot_combo.currentTextChanged.connect(self._on_space_plot_changed)
         self.layout().addRow("On the left show:", self.space_plot_combo)
         self.controls.append(self.space_plot_combo)
@@ -537,6 +548,10 @@ class DataWidget(DataLoader, QWidget):
             video_index = self.viewer.layers.index(video_layer)
             self.viewer.layers.move(video_index, 0)  # Move to bottom layer
             
+            if self.io_widget.flip_video_checkbox.isChecked():
+                video_layer.scale = (1, -1, 1)  
+
+
             self.sync_manager = NapariVideoSync(
                 viewer=self.viewer,
                 app_state=self.app_state,
@@ -629,6 +644,7 @@ class DataWidget(DataLoader, QWidget):
             self._add_boxes_layer()
         self._set_initial_state()
 
+            
 
 
     def closeEvent(self, event):

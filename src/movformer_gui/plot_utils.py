@@ -190,7 +190,8 @@ def plot_ds_variable(plot_item, ds, ds_kwargs, variable, color_variable=None):
     var = ds[variable]
     time = ds["time"].values
 
-    data, _ = sel_valid(var, ds_kwargs)
+    data, filt_kwargs = sel_valid(var, ds_kwargs)
+    var = var.sel(**filt_kwargs)
     plot_items = []
 
     if data.ndim == 2:
@@ -198,7 +199,11 @@ def plot_ds_variable(plot_item, ds, ds_kwargs, variable, color_variable=None):
         plot_items = plot_multidim(plot_item, time, data, coord_labels, plot_items)
 
     elif data.ndim == 1:
-        color_data, _ = sel_valid(ds[color_variable], ds_kwargs) if color_variable in ds.data_vars else None
+        if color_variable and color_variable in ds.data_vars:
+            color_data, _ = sel_valid(ds[color_variable], ds_kwargs)
+        else:
+            color_data = None
+
 
         # Build changepoints_dict from ds attributes, inspired by plots.py
         changepoints_dict = {}
