@@ -232,6 +232,7 @@ class LinePlot(QWidget):
         self.vb.setLimits(
             xMin=xMin - 1,
             xMax=xMax + 1,
+            minXRange=xRange * 0.1,
             maxXRange=xRange + 1,
         )
         
@@ -244,6 +245,7 @@ class LinePlot(QWidget):
             self.vb.setLimits(
                 yMin=y_min - y_buffer,
                 yMax=y_max + y_buffer,
+                minYRange=y_range * 0.1,
                 maxYRange=y_range + y_buffer
             )
 
