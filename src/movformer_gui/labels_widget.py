@@ -1,6 +1,7 @@
 """Widget for labeling segments in movement data."""
 from distinctipy import name
 import xarray as xr
+import h5netcdf
 import threading
 import shutil
 from collections.abc import Generator
@@ -603,17 +604,33 @@ class LabelsWidget(QWidget):
 
             self.data_widget.sync_manager.play_segment(start_frame, end_frame)
 
-    def _save_updated_nc(self):
-        """Save the updated NetCDF file with optional timestamp versioning."""
-        if not hasattr(self.app_state, 'nc_file_path'):
-            raise ValueError("No NetCDF file path specified in app_state.")
-
-        nc_path = Path(self.app_state.nc_file_path)
-        ds = self.app_state.ds
+    def _update_labels_inplace(self, nc_path: Path):
+        """Update only the labels variable in the NetCDF file without affecting other data."""
         
-        # Close to allow being overwritten
-        ds.close()       
-        ds.to_netcdf(nc_path, mode='w')
+
+        with h5netcdf.legacyapi.Dataset(str(nc_path), 'r+') as f:
+            labels_var = f.variables['labels']
+            labels_data = self.app_state.ds["labels"].values
+            
+            if labels_var.shape != labels_data.shape:
+                raise ValueError(f"Shape mismatch: file has {labels_var.shape}, data has {labels_data.shape}")
+            
+  
+            labels_var[:] = labels_data
+            f.sync()
+            
+
+
+    def _save_updated_nc(self):
+        """Save only updated labels to preserve data integrity of other variables."""
+        
+        nc_path = Path(self.app_state.nc_file_path)
+        
+        try:
+            self._update_labels_inplace(nc_path)
+        except Exception as e:
+            raise IOError(f"Failed to save labels to .nc file: {e}")
+ 
       
         if self.timestamp_checkbox.isChecked():
             versions_dir = nc_path.parent / "versions"
@@ -624,9 +641,7 @@ class LabelsWidget(QWidget):
             versioned_filename = f"{nc_path.stem}_{timestamp}{nc_path.suffix}"
             versioned_path = versions_dir / versioned_filename
             
-
-            if nc_path.exists():
-                shutil.copy2(nc_path, versioned_path)
+            shutil.copy2(nc_path, versioned_path)
         
 
     
