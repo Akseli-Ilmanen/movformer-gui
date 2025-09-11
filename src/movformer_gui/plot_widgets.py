@@ -40,6 +40,7 @@ class PlotsWidget(QWidget):
         self.ymax_edit = QLineEdit()
         self.spec_ymin_edit = QLineEdit()
         self.spec_ymax_edit = QLineEdit()
+        self.percentile_ylim_edit = QLineEdit()
         self.window_s_edit = QLineEdit()
         self.audio_buffer_edit = QLineEdit()
         self.spec_buffer_edit = QLineEdit()
@@ -65,23 +66,27 @@ class PlotsWidget(QWidget):
         layout.addWidget(QLabel("Y max (spectrogram):"), 1, 2)
         layout.addWidget(self.spec_ymax_edit, 1, 3)
         
-        layout.addWidget(QLabel("Window size (s):"), 2, 0)
-        layout.addWidget(self.window_s_edit, 2, 1)
+        # Row 2: Percentile Y-limits
+        layout.addWidget(QLabel("Percentile Y-limits:"), 2, 0)
+        layout.addWidget(self.percentile_ylim_edit, 2, 1)
+        
+        layout.addWidget(QLabel("Window size (s):"), 3, 0)
+        layout.addWidget(self.window_s_edit, 3, 1)
 
-        layout.setRowMinimumHeight(3, 10)
+        layout.setRowMinimumHeight(4, 10)
 
-        layout.addWidget(self.autoscale_checkbox, 4, 0)
-        layout.addWidget(self.lock_axes_checkbox, 4, 1)
-        layout.addWidget(self.apply_button, 4, 2)
+        layout.addWidget(self.autoscale_checkbox, 5, 0)
+        layout.addWidget(self.lock_axes_checkbox, 5, 1)
+        layout.addWidget(self.apply_button, 5, 2)
 
         
-        layout.setRowMinimumHeight(5, 10)
+        layout.setRowMinimumHeight(6, 10)
 
-        # Row 3: Audio buffer / Spectrogram buffer
-        layout.addWidget(QLabel("Audio buffer (s):"), 6, 0)
-        layout.addWidget(self.audio_buffer_edit, 6, 1)
-        layout.addWidget(QLabel("Spectrogram buffer (x):"), 6, 2)
-        layout.addWidget(self.spec_buffer_edit, 6, 3)
+        # Row 7: Audio buffer / Spectrogram buffer
+        layout.addWidget(QLabel("Audio buffer (s):"), 7, 0)
+        layout.addWidget(self.audio_buffer_edit, 7, 1)
+        layout.addWidget(QLabel("Spectrogram buffer (x):"), 7, 2)
+        layout.addWidget(self.spec_buffer_edit, 7, 3)
 
 
         # Connect edit signals
@@ -89,6 +94,7 @@ class PlotsWidget(QWidget):
         self.ymax_edit.editingFinished.connect(self._on_edited)
         self.spec_ymin_edit.editingFinished.connect(self._on_edited)
         self.spec_ymax_edit.editingFinished.connect(self._on_edited)
+        self.percentile_ylim_edit.editingFinished.connect(self._on_edited)
         self.window_s_edit.editingFinished.connect(self._on_edited)
         self.audio_buffer_edit.editingFinished.connect(self._on_edited)
         self.spec_buffer_edit.editingFinished.connect(self._on_edited)
@@ -118,6 +124,7 @@ class PlotsWidget(QWidget):
             ("ymax", self.ymax_edit),
             ("spec_ymin", self.spec_ymin_edit),
             ("spec_ymax", self.spec_ymax_edit),
+            ("percentile_ylim", self.percentile_ylim_edit),
             ("window_size", self.window_s_edit),
             ("audio_buffer", self.audio_buffer_edit),
             ("spec_buffer", self.spec_buffer_edit)
@@ -174,6 +181,7 @@ class PlotsWidget(QWidget):
             "ymax": self.ymax_edit,
             "spec_ymin": self.spec_ymin_edit,
             "spec_ymax": self.spec_ymax_edit,
+            "percentile_ylim": self.percentile_ylim_edit,
             "window_size": self.window_s_edit,
             "audio_buffer": self.audio_buffer_edit,
             "spec_buffer": self.spec_buffer_edit
@@ -201,6 +209,10 @@ class PlotsWidget(QWidget):
                 values["ymax"], 
             )
             
+        # If percentile_ylim changed, update zoom constraints
+        if "percentile_ylim" in values:
+            self.lineplot._apply_zoom_constraints()
+            
         self.lineplot._update_window_size()
             
 
@@ -212,6 +224,7 @@ class PlotsWidget(QWidget):
             ("ymax", self.ymax_edit),
             ("spec_ymin", self.spec_ymin_edit),
             ("spec_ymax", self.spec_ymax_edit),
+            ("percentile_ylim", self.percentile_ylim_edit),
             ("window_size", self.window_s_edit),
             ("audio_buffer", self.audio_buffer_edit),
             ("spec_buffer", self.spec_buffer_edit)

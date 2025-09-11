@@ -9,8 +9,6 @@ from movformer.utils.xr_utils import sel_valid
 from src.movformer_gui.plot_utils import (
     plot_ds_variable, 
     clear_plot_items, 
-    apply_view_settings,
-    get_motif_colours
 )
 from movformer.features.preprocessing import interpolate_nans
 
@@ -137,7 +135,7 @@ class LinePlot(QWidget):
             preserve_xlim = None
             if t0 is not None and t1 is not None:
                 preserve_xlim = (t0, t1)
-            apply_view_settings(self.plot_item, self.app_state, preserve_xlim)
+            self.set_x_range(preserve_xlim)
             # Update dynamic mode settings in case playback state changed
             self.set_label_mode()
 
@@ -158,6 +156,31 @@ class LinePlot(QWidget):
         if ymin is not None and ymax is not None:
             self.plot_item.setYRange(ymin, ymax)
     
+    def set_x_range(self, preserve_xlim=None):
+        """Apply view settings from app_state to the plot.
+        
+        Args:
+            plot_item: PyQtGraph PlotItem
+            app_state: application state object
+            preserve_xlim: tuple (xmin, xmax) to preserve, or None
+        """
+        vb = self.plot_item.getViewBox()
+        time = self.app_state.ds.time.values
+        
+        # Set x-limits with data bounds awareness
+        if preserve_xlim and len(preserve_xlim) == 2:
+            data_tmin = float(time[0])
+            data_tmax = float(time[-1])
+            t0 = max(preserve_xlim[0], data_tmin - (data_tmax - data_tmin) * 0.01)
+            t1 = min(preserve_xlim[1], data_tmax + (data_tmax - data_tmin) * 0.01)
+
+        else:
+            window_size = self.app_state.get_with_default("window_size")
+            t0 = float(time[0])
+            t1 = min(t0 + float(window_size), float(time[-1]))
+        
+        vb.setXRange(t0, t1, padding=0)
+            
         
     def _update_window_position(self) -> None:
         """Update window position to follow video when appropriate."""
@@ -239,8 +262,9 @@ class LinePlot(QWidget):
             maxXRange=xRange + 1,
         )
         
-        y_min = np.nanpercentile(data, 0.5)
-        y_max = np.nanpercentile(data, 99.5)
+        percentile_ylim = self.app_state.get_with_default("percentile_ylim")
+        y_min = np.nanpercentile(data, 100 - percentile_ylim)
+        y_max = np.nanpercentile(data, percentile_ylim)
         y_range = y_max - y_min
         y_buffer = (y_max - y_min) * 0.2
 
@@ -270,7 +294,7 @@ class LinePlot(QWidget):
 
 
             self.vb.setMouseEnabled(x=True, y=False)
-            self.vb.setMenuEnabled(False)
+            
         else:
             
             # Don't set xlim/ylim but set data-aware zoom constraints
@@ -278,7 +302,7 @@ class LinePlot(QWidget):
             
             
             self.vb.setMouseEnabled(x=True, y=True)
-            self.vb.setMenuEnabled(True)
+            
 
     def set_plots_widget(self, plots_widget):
         """Set reference to plots widget for updating controls."""

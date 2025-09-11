@@ -60,6 +60,7 @@ class AppStateSpec:
         "recompute_threshold": (float, 0.5, True, float),
         "cmap": (str, "magma", True, str),
         "lock_axes": (bool, False, True, bool),
+        "percentile_ylim": (float, 99.5, True, float),
         "space_plot_type": (str, "None", True, str),
         
     }

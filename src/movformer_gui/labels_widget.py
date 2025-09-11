@@ -462,7 +462,9 @@ class LabelsWidget(QWidget):
         if len(cp_ds.data_vars) == 0:
             return x_clicked_idx
 
-        snapped_val, _ = snap_to_nearest_changepoint(x_clicked_idx, cp_ds)
+        feature_sel = self.app_state.features_sel
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        snapped_val = snap_to_nearest_changepoint(x_clicked_idx, self.app_state.ds, feature_sel, ds_kwargs)
         return snapped_val
 
     def _apply_motif(self):

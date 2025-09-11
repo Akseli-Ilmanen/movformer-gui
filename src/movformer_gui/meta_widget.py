@@ -307,7 +307,7 @@ class MetaWidget(CollapsibleWidgetContainer):
             
         @viewer.bind_key("ctrl+a", overwrite=True)
         def apply_changes(v):
-            self.plots_widget.apply_button.setEnabled(True)
+            self.plots_widget.apply_button.click()
 
 
         def setup_keybindings_grid_layout(viewer, labels_widget):
