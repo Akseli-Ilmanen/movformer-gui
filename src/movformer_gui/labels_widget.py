@@ -212,6 +212,9 @@ class LabelsWidget(QWidget):
         self.motifs_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.motifs_table.setMaximumHeight(500)
         self.motifs_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        # Connect row selection to activate_motif
+        self.motifs_table.itemSelectionChanged.connect(self._on_table_selection_changed)
 
     def _create_control_buttons(self):
         """Create control buttons for labeling operations."""
@@ -301,6 +304,16 @@ class LabelsWidget(QWidget):
             qcolor = QColor(int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
             color_item.setBackground(qcolor)
             self.motifs_table.setItem(row, 2, color_item)
+
+    def _on_table_selection_changed(self):
+        """Handle table row selection changes by activating the selected motif."""
+        selected_rows = self.motifs_table.selectionModel().selectedRows()
+        if selected_rows:
+            row = selected_rows[0].row()
+            id_item = self.motifs_table.item(row, 0)
+            if id_item:
+                motif_id = id_item.data(Qt.UserRole)
+                self.activate_motif(motif_id)
 
     @contextmanager
     def _disable_sync_during_labeling(self) -> Generator[None, None, None]:
@@ -464,7 +477,7 @@ class LabelsWidget(QWidget):
 
         feature_sel = self.app_state.features_sel
         ds_kwargs = self.app_state.get_ds_kwargs()
-        snapped_val = snap_to_nearest_changepoint(x_clicked_idx, self.app_state.ds, feature_sel, ds_kwargs)
+        snapped_val = snap_to_nearest_changepoint(x_clicked_idx, self.app_state.ds, feature_sel, **ds_kwargs)
         return snapped_val
 
     def _apply_motif(self):

@@ -86,7 +86,7 @@ class LinePlot(QWidget):
         self.vb.setMouseEnabled(x=False, y=False)
         self.time_marker.setPen(pg.mkPen(color='r', width=3, style=pg.QtCore.Qt.SolidLine))
         self.time_marker.setZValue(1000)
-        self.app_state.lock_axes = True
+        self.plot_widget.lock_axes_checkbox.setChecked(True)
                 
 
     def set_label_mode(self) -> None:
@@ -187,23 +187,12 @@ class LinePlot(QWidget):
         if not hasattr(self.app_state, 'current_frame') or not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
             return
             
-        current_time = self.app_state.current_frame / self.app_state.ds.fps
-        
         self._update_window_size()
+        self.toggle_axes_lock()
         
-
-        y_min = self.app_state.get_with_default('ymin')
-        y_max = self.app_state.get_with_default('ymax')
-    
-        if y_min is not None and y_max is not None:
-            self.vb.setRange(yRange=(y_min, y_max), padding=0)
-
-
-        # Update time marker position and ensure visibility
+        current_time = self.app_state.current_frame / self.app_state.ds.fps
         self.time_marker.setValue(current_time)
         self.time_marker.show()
-        
-        # Ensure marker is on top
         self.time_marker.setZValue(1000)
         
 

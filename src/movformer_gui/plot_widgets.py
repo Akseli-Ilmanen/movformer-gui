@@ -4,7 +4,7 @@ from qtpy.QtWidgets import (QGridLayout, QLineEdit, QWidget, QPushButton,
                             QVBoxLayout, QLabel, QCheckBox)
 from napari.viewer import Viewer
 from typing import Optional
-
+from qtpy.QtGui import QDoubleValidator
 
 class PlotsWidget(QWidget):
     """Plot controls with sync mode awareness.
@@ -40,7 +40,12 @@ class PlotsWidget(QWidget):
         self.ymax_edit = QLineEdit()
         self.spec_ymin_edit = QLineEdit()
         self.spec_ymax_edit = QLineEdit()
+        
         self.percentile_ylim_edit = QLineEdit()
+        validator = QDoubleValidator(95.0, 100, 2, self)
+        validator.setNotation(QDoubleValidator.StandardNotation)
+        self.percentile_ylim_edit.setValidator(validator)
+        
         self.window_s_edit = QLineEdit()
         self.audio_buffer_edit = QLineEdit()
         self.spec_buffer_edit = QLineEdit()
@@ -67,7 +72,7 @@ class PlotsWidget(QWidget):
         layout.addWidget(self.spec_ymax_edit, 1, 3)
         
         # Row 2: Percentile Y-limits
-        layout.addWidget(QLabel("Percentile Y-limits:"), 2, 0)
+        layout.addWidget(QLabel("Percentile zoom out y-limits:"), 2, 0)
         layout.addWidget(self.percentile_ylim_edit, 2, 1)
         
         layout.addWidget(QLabel("Window size (s):"), 3, 0)
