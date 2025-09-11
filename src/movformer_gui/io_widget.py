@@ -1,4 +1,3 @@
-from qtpy.QtWidgets import QCheckBox
 
 """Widget for input/output controls and data loading."""
 
@@ -10,7 +9,10 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QPushButton,
     QWidget,
+    QCheckBox,
 )
+from .app_state import AppStateSpec
+from pathlib import Path
 
 
 class IOWidget(QWidget):
@@ -26,7 +28,16 @@ class IOWidget(QWidget):
         self.combos = {}
         # List to store controls for enabling/disabling
         self.controls = []
+        
+        
 
+        self.reset_button = QPushButton("Reset gui_settings.yaml")
+        self.reset_button.setObjectName("reset_button")
+        self.reset_button.clicked.connect(self._on_reset_gui_clicked)
+        self.layout().addRow(self.reset_button)
+
+        
+        
         self._create_path_folder_widgets()
         self._create_device_combos()
         self._create_load_button()
@@ -40,6 +51,67 @@ class IOWidget(QWidget):
             self.audio_folder_edit.setText(self.app_state.audio_folder)
         if self.app_state.tracking_folder:
             self.tracking_folder_edit.setText(self.app_state.tracking_folder)
+
+    def _on_reset_gui_clicked(self):
+        """Reset the GUI to its initial state."""
+     
+
+        self.app_state.delete_yaml()
+        
+        # Reset all app_state attributes to their defaults
+        for var, (var_type, default, _, _) in AppStateSpec.VARS.items():
+            setattr(self.app_state._state, var, default)
+        
+        # Clear all dynamic _sel attributes
+        for attr in list(dir(self.app_state)):
+            if attr.endswith("_sel") or attr.endswith("_sel_previous"):
+                try:
+                    delattr(self.app_state, attr)
+                except AttributeError:
+                    pass
+        
+        self._clear_all_line_edits()
+        self._clear_combo_boxes()
+        
+        if hasattr(self, 'flip_video_checkbox'):
+            self.flip_video_checkbox.setChecked(False)
+        
+        yaml_path = self._default_yaml_path()
+        self.app_state._yaml_path = str(yaml_path)
+        self.app_state.save_to_yaml()
+  
+  
+  
+
+    def _default_yaml_path(self) -> Path:
+        """Create default YAML path (same logic as meta_widget)."""
+        yaml_path = Path.cwd() / "gui_settings.yaml"
+        try:
+            yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            yaml_path.touch(exist_ok=True)
+        except (OSError, PermissionError):
+            yaml_path = Path.home() / "gui_settings.yaml"
+            yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            yaml_path.touch(exist_ok=True)
+        return yaml_path
+
+    def _clear_all_line_edits(self):
+        """Clear all QLineEdit fields in the widget."""
+        if hasattr(self, 'nc_file_path_edit'):
+            self.nc_file_path_edit.clear()
+        if hasattr(self, 'video_folder_edit'):
+            self.video_folder_edit.clear()
+        if hasattr(self, 'audio_folder_edit'):
+            self.audio_folder_edit.clear()
+        if hasattr(self, 'tracking_folder_edit'):
+            self.tracking_folder_edit.clear()
+
+    def _clear_combo_boxes(self):
+        """Reset all combo boxes to default state."""
+        for combo in self.combos.values():
+            combo.clear()
+            combo.addItems(["None"])
+            combo.setCurrentText("None")
 
     def _create_path_widget(self, label: str, object_name: str, browse_callback):
         """Generalized function to create a line edit and browse button for file/folder paths."""
@@ -77,7 +149,7 @@ class IOWidget(QWidget):
     def _create_path_folder_widgets(self):
         """Create file path, video folder, and audio folder selectors."""
         self.nc_file_path_edit = self._create_path_widget(
-            label="File path:",
+            label="File path (.nc):",
             object_name="nc_file_path",
             browse_callback=lambda: self.on_browse_clicked("file"),
         )

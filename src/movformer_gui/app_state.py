@@ -61,7 +61,7 @@ class AppStateSpec:
         "cmap": (str, "magma", True, str),
         "lock_axes": (bool, False, True, bool),
         "percentile_ylim": (float, 99.5, True, float),
-        "space_plot_type": (str, "None", True, str),
+        "space_plot_type": (str, "Layer controls", True, str),
         
     }
 
@@ -289,7 +289,22 @@ class ObservableAppState(QObject):
         except (OSError, yaml.YAMLError) as e:
             print(f"Error loading state from YAML: {e}")
             return False
-
+        
+    def delete_yaml(self, yaml_path: str | None = None) -> bool:
+        try:
+            path = yaml_path or self._yaml_path
+            p = Path(path)
+            if p.exists():
+                p.unlink()
+                print(f"Deleted YAML file {path}")
+                return True
+            else:
+                print(f"YAML file {path} does not exist")
+                return False
+        except OSError as e:
+            print(f"Error deleting YAML file: {e}")
+            return False
+    
     def stop_auto_save(self):
         if self._auto_save_timer.isActive():
             self._auto_save_timer.stop()

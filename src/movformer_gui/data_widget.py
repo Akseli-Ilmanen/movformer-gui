@@ -31,6 +31,7 @@ from typing import Optional
 from .space_plot import SpacePlot
 
 
+
 class DataWidget(DataLoader, QWidget):
     """Widget to control which data is loaded, displayed and stored for next time."""
 
@@ -49,15 +50,15 @@ class DataWidget(DataLoader, QWidget):
         self.setLayout(QFormLayout())
         self.app_state = app_state
         self.meta_widget = meta_widget
-        self.io_widget = io_widget  # Reference to I/O widget
+        self.io_widget = io_widget  
         self.sync_manager = None  # Will be either NapariVideoSync or StreamingVideoSync
-        self.lineplot = None  # Will be set after creation
-        self.labels_widget = None  # Will be set after creation
-        self.plots_widget = None  # Will be set after creation
-        self.audio_player = None  # Audio player widget
+        self.lineplot = None  
+        self.labels_widget = None  
+        self.plots_widget = None  
+        self.audio_player = None 
         self.video_path = None
         self.audio_path = None
-        self.space_plot = None  # SpacePlot widget
+        self.space_plot = None  
 
         # Dictionary to store all combo boxes
         self.combos = {}
@@ -153,14 +154,13 @@ class DataWidget(DataLoader, QWidget):
     def _remove_video_slider_from_viewer(self):
         """Remove video slider widget from napari's interface."""
         try:
-            # Remove from QtDims layout if integrated there
             if hasattr(self, '_video_slider_widget') and hasattr(self, '_qt_dims_layout'):
                 self._qt_dims_layout.removeWidget(self._video_slider_widget)
                 self._video_slider_widget.setParent(None)
                 delattr(self, '_video_slider_widget')
                 delattr(self, '_qt_dims_layout')
             
-            # Remove dock widget if used as fallback
+
             if hasattr(self, '_video_slider_dock'):
                 self.viewer.window.remove_dock_widget(self._video_slider_dock)
                 delattr(self, '_video_slider_dock')
@@ -170,6 +170,12 @@ class DataWidget(DataLoader, QWidget):
 
     def on_load_clicked(self):
         """Load the file and show line plot in napari dock."""
+        
+        if not self.app_state.video_folder or not self.app_state.nc_file_path:
+            show_error("Please select a path ending with .nc and a folder containing video files.")
+            return
+        
+        
         self.setVisible(False)
 
         # Load ds
@@ -676,7 +682,7 @@ class DataWidget(DataLoader, QWidget):
         if not self.app_state.ready:
             return
 
-        plot_type = getattr(self.app_state, 'space_plot_type', 'None')
+        plot_type = self.app_state.get_with_default('space_plot_type')
         
         if plot_type == "Layer controls":
             if self.space_plot:
@@ -707,3 +713,48 @@ class DataWidget(DataLoader, QWidget):
         """Highlight positions in space plot based on current frame."""
         if self.space_plot and self.space_plot.dock_widget.isVisible():
             self.space_plot.highlight_positions(start_frame, end_frame)
+
+    def reset_widget_state(self):
+        """Reset the data widget to its default state."""
+        # Clear all combo boxes in this widget
+        for combo in self.combos.values():
+            combo.clear()
+            combo.addItems(["None"])
+            combo.setCurrentText("None")
+        
+        # Reset checkboxes
+        if hasattr(self, 'plot_spec_checkbox'):
+            self.plot_spec_checkbox.setChecked(False)
+        if hasattr(self, 'clear_audio_checkbox'):
+            self.clear_audio_checkbox.setChecked(False)
+        
+        # Reset space plot combo if it exists
+        if hasattr(self, 'space_plot_combo'):
+            self.space_plot_combo.clear()
+            self.space_plot_combo.addItems(["Layer controls"])
+            self.space_plot_combo.setCurrentText("Layer controls")
+        
+        # Reset trial conditions combo if it exists
+        if hasattr(self, 'trial_conditions_value_combo'):
+            self.trial_conditions_value_combo.clear()
+            self.trial_conditions_value_combo.addItems(["None"])
+            self.trial_conditions_value_combo.setCurrentText("None")
+            
+        # Clear navigation widget trials combo
+        if self.navigation_widget and hasattr(self.navigation_widget, 'trials_combo'):
+            self.navigation_widget.trials_combo.clear()
+        
+        # Reset various state variables
+        self.type_vars_dict = {}
+        self.video_path = None
+        self.audio_path = None
+        self.fps = None
+        self.source_software = None
+        self.file_path = None
+        self.file_name = None
+        
+        # Hide space plot if it exists
+        if self.space_plot:
+            self.space_plot.hide()
+            
+        print("DataWidget state reset to default")
