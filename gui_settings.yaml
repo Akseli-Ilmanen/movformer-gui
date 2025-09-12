@@ -1,20 +1,20 @@
-nc_file_path: D:/Alice/AK_data/derivatives/sub-01_id-Ivy/ses-000_date-20250309_01/behav/Trial_data.nc
-plot_spectrogram: false
-buffer_multiplier: 5.0
-recompute_threshold: 0.5
-vmin_db: -120.0
-space_plot_type: Layer controls
-nfft: 1024
-fps_playback: 30.0
-video_buffer_size: 300
-vmax_db: 20.0
-video_folder: D:/Alice/VidData/20250309_01_Ivy
-window_size: 2.0
-video_path: D:\Alice\VidData\20250309_01_Ivy\2025-03-09_019_Ivy-cam-1.mp4
-lock_axes: false
-hop_frac: 0.5
 cmap: magma
+nfft: 1024
+video_buffer_size: 300
+video_path: D:\Alice\VidData\20250309_01_Ivy\2025-03-09_021_Ivy-cam-1.mp4
+lock_axes: false
+nc_file_path: D:/Alice/AK_data/derivatives/sub-01_id-Ivy/ses-000_date-20250309_01/behav/Trial_data.nc
+vmin_db: -120.0
+fps_playback: 30.0
+vmax_db: 20.0
 percentile_ylim: 99.5
+plot_spectrogram: false
+hop_frac: 0.5
+space_plot_type: Layer controls
+recompute_threshold: 0.5
+video_folder: D:/Alice/VidData/20250309_01_Ivy
+buffer_multiplier: 5.0
+window_size: 2.0
 cameras_sel: cam1_files
 colors_sel: angle_rgb
 features_sel: speed
@@ -23,4 +23,4 @@ individuals_sel: Ivy
 individuals_sel_previous: Freddy
 keypoints_sel: beakTip
 trial_conditions_sel: None
-trials_sel: 19
+trials_sel: 21

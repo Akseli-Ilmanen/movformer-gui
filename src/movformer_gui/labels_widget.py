@@ -608,7 +608,7 @@ class LabelsWidget(QWidget):
         """Update only the labels variable in the NetCDF file without affecting other data."""
         
 
-        with h5netcdf.legacyapi.File(str(nc_path), 'r+') as f:
+        with h5netcdf.File(str(nc_path), 'r+') as f:
             labels_var = f.variables['labels']
             labels_data = self.app_state.ds["labels"].values
             
