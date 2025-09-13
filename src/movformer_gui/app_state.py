@@ -30,10 +30,13 @@ class AppStateSpec:
 
         # Data
         "ds": (xr.Dataset | None, None, False, object),
+        "dt": (xr.DataTree | None, None, False, object),
         "fps_playback": (float, 30.0, True, float),
         "trials": (list[int], [], False, object),
         "trials_sel_condition_value": (str | None, None, True, object),
         "plot_spectrogram": (bool, False, True, bool),
+        "load_s3d": (bool, False, False, bool),
+        
         
         # Paths
         "nc_file_path": (str | None, None, True, str),
@@ -59,10 +62,10 @@ class AppStateSpec:
         "buffer_multiplier": (float, 5.0, True, float),
         "recompute_threshold": (float, 0.5, True, float),
         "cmap": (str, "magma", True, str),
-        "lock_axes": (bool, False, True, bool),
         "percentile_ylim": (float, 99.5, True, float),
         "space_plot_type": (str, "Layer controls", True, str),
         
+        "lock_axes": (bool, False, False, bool), # always started unlocked
     }
 
 
@@ -154,22 +157,17 @@ class ObservableAppState(QObject):
 
     # --- Dynamic _sel variables ---
     def get_ds_kwargs(self):
-        ds_kwargs = {"trials": self.trials_sel}
-        ds_kwargs["trials"] = int(ds_kwargs["trials"])
+        ds_kwargs = {}
 
-        # Only include dimensions that exist in the dataset
-        if self.ds is not None:
-            if hasattr(self, "keypoints_sel") and "keypoints" in self.ds.dims:
-                ds_kwargs["keypoints"] = self.keypoints_sel
-            if hasattr(self, "individuals_sel") and "individuals" in self.ds.dims:
-                ds_kwargs["individuals"] = self.individuals_sel
-        else:
-            # Fallback for when dataset isn't loaded yet
-            if hasattr(self, "keypoints_sel"):
-                ds_kwargs["keypoints"] = self.keypoints_sel
-            if hasattr(self, "individuals_sel"):
-                ds_kwargs["individuals"] = self.individuals_sel
+
+        if hasattr(self, "keypoints_sel") and "keypoints" in self.ds.dims:
+            ds_kwargs["keypoints"] = self.keypoints_sel
+        if hasattr(self, "individuals_sel") and "individuals" in self.ds.dims:
+            ds_kwargs["individuals"] = self.individuals_sel
+            
         return ds_kwargs
+            
+
 
     def key_sel_exists(self, type_key: str) -> bool:
         """Check if a key selection exists for a given type."""

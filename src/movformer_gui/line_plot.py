@@ -86,7 +86,7 @@ class LinePlot(QWidget):
         self.vb.setMouseEnabled(x=False, y=False)
         self.time_marker.setPen(pg.mkPen(color='r', width=3, style=pg.QtCore.Qt.SolidLine))
         self.time_marker.setZValue(1000)
-        self.plot_widget.lock_axes_checkbox.setChecked(True)
+        self.plots_widget.lock_axes_checkbox.setChecked(True)
                 
 
     def set_label_mode(self) -> None:
@@ -129,13 +129,13 @@ class LinePlot(QWidget):
         
         
         if self.app_state.sync_state == "pyav_stream_mode":
-            self._update_window_position()
+            self.set_x_range(mode='center')
         else:
             # In interactive state, preserve xlim if provided
-            preserve_xlim = None
             if t0 is not None and t1 is not None:
-                preserve_xlim = (t0, t1)
-            self.set_x_range(preserve_xlim)
+                self.set_x_range(mode='preserve', curr_xlim=(t0, t1))
+            else:
+                self.set_x_range(mode='default')
             # Update dynamic mode settings in case playback state changed
             self.set_label_mode()
 
@@ -156,41 +156,49 @@ class LinePlot(QWidget):
         if ymin is not None and ymax is not None:
             self.plot_item.setYRange(ymin, ymax)
     
-    def set_x_range(self, preserve_xlim=None):
-        """Apply view settings from app_state to the plot.
+    def set_x_range(self, mode='default', curr_xlim=None, center_on_frame=None):
+        """Set plot x-range with different behaviors.
         
         Args:
-            plot_item: PyQtGraph PlotItem
-            app_state: application state object
-            preserve_xlim: tuple (xmin, xmax) to preserve, or None
+            mode: 'default' (start from t0), 'preserve' (keep current), 'center' (center on frame)
+            curr_xlim: tuple (xmin, xmax) to preserve
+            center_on_frame: frame number to center on
         """
-        vb = self.plot_item.getViewBox()
         time = self.app_state.ds.time.values
         
-        # Set x-limits with data bounds awareness
-        if preserve_xlim and len(preserve_xlim) == 2:
+        if mode == 'center':
+            if not hasattr(self.app_state, 'window_size'):
+                return
+                
+            if center_on_frame is not None:
+                current_time = center_on_frame / self.app_state.ds.fps
+            else:
+                current_time = self.app_state.current_frame / self.app_state.ds.fps
+            
+            window_size = self.app_state.get_with_default('window_size')
+            half_window = window_size / 2.0
+            t0 = current_time - half_window
+            t1 = current_time + half_window
+            
+        elif mode == 'preserve' and curr_xlim:
             data_tmin = float(time[0])
             data_tmax = float(time[-1])
-            t0 = max(preserve_xlim[0], data_tmin - (data_tmax - data_tmin) * 0.01)
-            t1 = min(preserve_xlim[1], data_tmax + (data_tmax - data_tmin) * 0.01)
-
-        else:
+            t0 = max(curr_xlim[0], data_tmin - (data_tmax - data_tmin) * 0.01)
+            t1 = min(curr_xlim[1], data_tmax + (data_tmax - data_tmin) * 0.01)
+            
+        else:  # mode == 'default'
             window_size = self.app_state.get_with_default("window_size")
             t0 = float(time[0])
             t1 = min(t0 + float(window_size), float(time[-1]))
         
-        vb.setXRange(t0, t1, padding=0)
-            
+        self.vb.setXRange(t0, t1, padding=0)
         
-    def _update_window_position(self) -> None:
-        """Update window position to follow video when appropriate."""
+    def update_time_marker_and_window(self, frame_number: int):
+        """Update time marker position and window if centering on frame."""
         if not hasattr(self.app_state, 'current_frame') or not hasattr(self.app_state, 'ds') or self.app_state.ds is None:
             return
             
-        self._update_window_size()
-        self.toggle_axes_lock()
-        
-        current_time = self.app_state.current_frame / self.app_state.ds.fps
+        current_time = frame_number / self.app_state.ds.fps
         self.time_marker.setValue(current_time)
         self.time_marker.show()
         self.time_marker.setZValue(1000)
@@ -198,20 +206,7 @@ class LinePlot(QWidget):
 
 
         
-    def _update_window_size(self) -> None:
-        """Set window size by a multiplicative factor."""
-        if not hasattr(self.app_state, 'window_size'):
-            return
 
-        current_time = self.app_state.current_frame / self.app_state.ds.fps
-        window_size = self.app_state.get_with_default('window_size')
-        
-        # Calculate window bounds centered on current time
-        half_window = window_size / 2.0
-        x_min = current_time - half_window
-        x_max = current_time + half_window
-        
-        self.vb.setRange(xRange=(x_min, x_max), padding=0)
             
             
             
@@ -220,28 +215,11 @@ class LinePlot(QWidget):
         """Apply data-aware zoom constraints to the plot viewbox."""
 
     
-        feature_sel = self.app_state.features_sel
-        ds_kwargs = self.app_state.get_ds_kwargs()
 
-        
-        data, _ = sel_valid(self.app_state.ds[feature_sel], ds_kwargs)
-       
-        # Excluding leading and trailing NaNs for time axis limits, find xmin/xmax        
-        data = interpolate_nans(data, axis=0)
-        
-        
-        if data.ndim == 2:
-            valid_indices = np.where(np.any(data != 0, axis=1))[0]
-        elif data.ndim == 1:
-            valid_indices = np.nonzero(data)[0]
-            
-        xMinIdx = valid_indices[0]
-        xMaxIdx = valid_indices[-1]
 
-        # Convert to seconds
         time = self.app_state.ds.time.values        
-        xMin = time[xMinIdx]
-        xMax = time[xMaxIdx]
+        xMin = time[0]
+        xMax = time[-1]
         xRange = xMax - xMin
         
         self.vb.setLimits(
@@ -249,6 +227,12 @@ class LinePlot(QWidget):
             xMax=xMax + 1,
             maxXRange=xRange + 1,
         )
+        
+        feature_sel = self.app_state.features_sel
+        ds_kwargs = self.app_state.get_ds_kwargs()
+        data, _ = sel_valid(self.app_state.ds[feature_sel], ds_kwargs)
+       
+        
         
         percentile_ylim = self.app_state.get_with_default("percentile_ylim")
         y_min = np.nanpercentile(data, 100 - percentile_ylim)
@@ -270,6 +254,8 @@ class LinePlot(QWidget):
         """Enable or disable axes locking to prevent zoom but allow panning."""
         locked = self.app_state.lock_axes
         
+        
+        
         if locked:
             current_xlim = self.vb.viewRange()[0]
             current_ylim = self.vb.viewRange()[1] 
@@ -290,6 +276,8 @@ class LinePlot(QWidget):
             
             
             self.vb.setMouseEnabled(x=True, y=True)
+            
+            
             
 
     def set_plots_widget(self, plots_widget):

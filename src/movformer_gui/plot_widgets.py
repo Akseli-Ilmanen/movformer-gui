@@ -177,10 +177,8 @@ class PlotsWidget(QWidget):
         """Handle user edits to input fields."""
         if not self.lineplot:
             return
-        
-        self.lock_axes_checkbox.setChecked(False)
- 
-        
+
+
         edits = {
             "ymin": self.ymin_edit,
             "ymax": self.ymax_edit,
@@ -218,8 +216,23 @@ class PlotsWidget(QWidget):
         if "percentile_ylim" in values:
             self.lineplot._apply_zoom_constraints()
             
-        self.lineplot._update_window_size()
-            
+        new_xmin, new_xmax = self._calculate_new_window_size()
+        self.lineplot.set_x_range(mode='preserve', curr_xlim=(new_xmin, new_xmax))
+
+
+    def _calculate_new_window_size(self):
+        """Calculate new window size preserving center and current x-limits."""
+        if not self.lineplot:
+            return
+
+        self.curr_xlim = self.lineplot.get_current_xlim()
+        self.current_time = self.app_state.current_frame / self.app_state.ds.fps
+        window_size = self.app_state.get_with_default("window_size")
+        half_window = window_size / 2
+
+        new_xmin = self.current_time - half_window
+        new_xmax = self.current_time + half_window
+        return new_xmin, new_xmax
 
 
     def _reset_to_defaults(self):

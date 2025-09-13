@@ -68,7 +68,7 @@ class SpacePlot(QWidget):
 
         super().hide()
     
-    def update_plot(self, plot_type: str, trial: str, individual: str = None, keypoints: str = None, color_variable: str = None):
+    def update_plot(self, plot_type: str, individual: str = None, keypoints: str = None, color_variable: str = None):
         """Update the plot based on the selected type and parameters."""
         if not self.app_state.ds:
             return
@@ -81,22 +81,21 @@ class SpacePlot(QWidget):
         self.ax = self.figure.add_subplot(111)
         
 
-        trial_int = int(trial) if trial else None
+
         
         if plot_type == "plot_box_topview":
-            self._plot_box_topview(trial_int, individual, keypoints, color_variable)
+            self._plot_box_topview(individual, keypoints, color_variable)
         elif plot_type == "plot_centroid_trajectory":
-            self._plot_centroid_trajectory(trial_int, individual, keypoints)
+            self._plot_centroid_trajectory(individual, keypoints)
  
         
         self.canvas.draw()
 
-    def _plot_box_topview(self, trial: int, individual: str, keypoints: str, color_variable: str = None):
+    def _plot_box_topview(self, individual: str, keypoints: str, color_variable: str = None):
         """Create box topview plot."""
         ds_kwargs = {}
         
 
-        ds_kwargs["trials"] = trial
         if individual and individual != "None":
             ds_kwargs["individuals"] = individual
         if keypoints and keypoints != "None":
@@ -109,14 +108,13 @@ class SpacePlot(QWidget):
         plot_box_topview(self.ax, self.app_state.ds, color_variable, **ds_kwargs)
 
     
-    def _plot_centroid_trajectory(self, trial: int, individual: str, keypoints: str):
+    def _plot_centroid_trajectory(self, individual: str, keypoints: str):
         """Create centroid trajectory plot."""
         if not hasattr(self.app_state.ds, 'position'):
             raise ValueError("Dataset must have 'position' variable for centroid trajectory plot")
             
         # Select data for the specific trial
         da = self.app_state.ds.position
-        da = da.sel(trials=trial)
             
         plot_centroid_trajectory(
             ax=self.ax, 
@@ -136,7 +134,7 @@ class SpacePlot(QWidget):
         for col in collections_to_remove:
             col.remove()
 
-        xy = self.app_state.ds.position.sel(space=["x", "y"], **self.ds_kwargs)
+        xy = self.app_state.ds.sel(space=["x", "y"], **self.ds_kwargs).position
 
 
         highlighted_points = xy[start_frame:end_frame + 1]

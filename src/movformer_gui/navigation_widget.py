@@ -97,6 +97,9 @@ class NavigationWidget(QWidget):
 
     def toggle_sync(self) -> None:
         """Toggle between sync modes."""
+        if not self.app_state.ready:
+            return
+        
         current_index = self.sync_toggle_btn.currentIndex()
 
         if current_index == 0:
@@ -109,20 +112,22 @@ class NavigationWidget(QWidget):
         self.data_widget.set_sync_mode(new_mode)
         
         # Trigger video player switching by updating video/audio
-        if self.data_widget and self.app_state.ready:
-            self.data_widget.update_video_audio()
+        self.data_widget.update_video_audio()
+    
 
 
 
 
     def _trial_change_consequences(self):
         """Handle consequences of trial changes."""
-
+        trials_sel = self.app_state.trials_sel
+        
+        self.app_state.ds = self.app_state.dt.sel(trials=trials_sel)        
         self.app_state.current_frame = 0
         self.data_widget.update_tracking()
         self.data_widget.update_video_audio()
         self.data_widget.update_motif_label()
-        self.data_widget.update_plot()
+        self.data_widget.update_line_plot()
         self.data_widget.update_space_plot()
 
     def _on_trial_changed(self):
@@ -135,8 +140,8 @@ class NavigationWidget(QWidget):
             return
 
         try:
-            trial_value = int(current_text)
-            self.app_state.set_key_sel("trials", trial_value)
+            trials_sel = int(current_text)
+            self.app_state.set_key_sel("trials", trials_sel)
             self._trial_change_consequences()
 
             # Reset time to 0 on trial change

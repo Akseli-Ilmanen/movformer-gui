@@ -31,6 +31,7 @@ from qtpy.QtWidgets import (
 from movformer.features.changepoints import snap_to_nearest_changepoint
 from movformer.utils.labels import load_motif_mapping
 from movformer.utils.xr_utils import sel_valid
+from movformer.utils.io import TrialTree    
 import time
 import tempfile
 from pathlib import Path
@@ -40,6 +41,8 @@ import shutil
 import xarray as xr
 from qtpy.QtWidgets import QSizePolicy
 from qtpy.QtCore import Signal
+
+
 
 class LabelsWidget(QWidget):
     """Widget for labeling movement motifs in time series data."""
@@ -520,7 +523,9 @@ class LabelsWidget(QWidget):
             self.ready_for_label_click = False
 
             # Save updated labels back to dataset
-            self.app_state.ds["labels"].loc[filt_kwargs] = labels
+            self.app_state.dt.sel(trials=self.app_state.trials_sel).labels.loc[filt_kwargs] = labels
+            
+            
             
             # Mark changes as unsaved
             self._mark_changes_unsaved()
@@ -557,7 +562,7 @@ class LabelsWidget(QWidget):
             self.current_motif_id = None
 
             # Save updated labels back to dataset
-            self.app_state.ds["labels"].loc[filt_kwargs] = labels
+            self.app_state.dt.sel(trials=self.app_state.trials_sel).labels.loc[filt_kwargs] = labels
             
             # Mark changes as unsaved
             self._mark_changes_unsaved()
@@ -604,21 +609,7 @@ class LabelsWidget(QWidget):
 
             self.data_widget.sync_manager.play_segment(start_frame, end_frame)
 
-    def _update_labels_inplace(self, nc_path: Path):
-        """Update only the labels variable in the NetCDF file without affecting other data."""
-        
 
-        with h5netcdf.File(str(nc_path), 'r+') as f:
-            labels_var = f.variables['labels']
-            labels_data = self.app_state.ds["labels"].values
-            
-            if labels_var.shape != labels_data.shape:
-                raise ValueError(f"Shape mismatch: file has {labels_var.shape}, data has {labels_data.shape}")
-            
-  
-            labels_var[:] = labels_data
-            f.sync()
-            
 
 
     def _save_updated_nc(self):
@@ -627,10 +618,11 @@ class LabelsWidget(QWidget):
         nc_path = Path(self.app_state.nc_file_path)
         
         try:
-            self._update_labels_inplace(nc_path)
+            self.app_state.dt.close()
+            self.app_state.dt.to_netcdf(nc_path)
         except Exception as e:
             raise IOError(f"Failed to save labels to .nc file: {e}")
- 
+    
       
         if self.timestamp_checkbox.isChecked():
             versions_dir = nc_path.parent / "versions"
@@ -645,9 +637,9 @@ class LabelsWidget(QWidget):
         
 
     
-        self.app_state.ds = xr.open_dataset(nc_path)
-        
+        self.app_state.dt = TrialTree.from_file(nc_path)
       
+
         self.app_state.changes_saved = True
 
         show_info(f"✅ File saved successfully: {nc_path.name}")

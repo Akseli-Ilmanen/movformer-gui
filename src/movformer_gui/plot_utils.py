@@ -141,8 +141,13 @@ def plot_singledim(plot_item, time, data, color_data=None, changepoints_dict=Non
     if changepoints_dict is not None:
         # Use tab10 color palette from matplotlib, converted to 0-255 RGB
         
+        
+        
         cmap = plt.get_cmap('tab10')
+        
         colors = [tuple(int(c*255) for c in cmap.colors[i][:3]) for i in range(len(cmap.colors))]
+        
+        
         for i, (cp_name, cp_array) in enumerate(changepoints_dict.items()):
             idxs = np.where(cp_array)[0]
             color = colors[(i+5) % len(colors)]  # offset to match original
@@ -170,7 +175,7 @@ def plot_ds_variable(plot_item, ds, ds_kwargs, variable, color_variable=None):
     Args:
         plot_item: PyQtGraph PlotItem to plot on
         ds: xarray Dataset
-        ds_kwargs: dict with selection criteria (e.g., {trials=20, keypoints="beakTip"})
+        ds_kwargs: dict with selection criteria (e.g., {keypoints="beakTip"})
         variable: variable name to plot
         color_variable: optional variable name for coloring
         
@@ -226,7 +231,7 @@ def plot_ds_variable(plot_item, ds, ds_kwargs, variable, color_variable=None):
     
     # Add boundary events as vertical lines
     if hasattr(ds, "boundary_events"):
-        boundary_events_raw = ds["boundary_events"].sel(trials=ds_kwargs["trials"]).values
+        boundary_events_raw = ds["boundary_events"].values
         valid_events = boundary_events_raw[~np.isnan(boundary_events_raw)]
         eventsIdxs = valid_events.astype(int)
         eventsIdxs = eventsIdxs[(eventsIdxs >= 0) & (eventsIdxs < len(time))]

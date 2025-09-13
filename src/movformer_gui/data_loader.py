@@ -3,9 +3,10 @@
 
 import xarray as xr
 import numpy as np
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from pathlib import Path
 from napari.utils.notifications import show_error
+from movformer.utils.io import TrialTree
 
 
 
@@ -33,112 +34,111 @@ def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
         show_error(error_msg)
         return None, None
 
-    ds = xr.open_dataset(file_path).load()
+    dt = TrialTree.from_file(file_path)
+    
+    
 
-    # Check minimum required coordinates and variables
-    required_coords = ['trials', 'time']
-    missing_coords = [coord for coord in required_coords if coord not in ds.coords]
-    if missing_coords:
-        error_msg = f"Dataset missing required coordinates: {missing_coords}"
-        show_error(error_msg)
-        return None, None
+    # REWRITE 
+    # # Check minimum required coordinates and variables
+    # required_coords = ['trials', 'time']
+    # missing_coords = [coord for coord in required_coords if coord not in ds.coords]
+    # if missing_coords:
+    #     error_msg = f"Dataset missing required coordinates: {missing_coords}"
+    #     show_error(error_msg)
+    #     return None, None
 
-    required_vars = ["labels"]
-    missing_vars = [var for var in required_vars if var not in ds.data_vars]
-    if missing_vars:
-        error_msg = f"Dataset missing required variables: {missing_vars}"
-        show_error(error_msg)
-        return None, None
+    # required_vars = ["labels"]
+    # missing_vars = [var for var in required_vars if var not in ds.data_vars]
+    # if missing_vars:
+    #     error_msg = f"Dataset missing required variables: {missing_vars}"
+    #     show_error(error_msg)
+    #     return None, None 
 
-    if not hasattr(ds, "fps"):
-        show_error("Dataset must have 'fps' attribute for video processing.")
+    # if not hasattr(ds, "fps"):
+    #     show_error("Dataset must have 'fps' attribute for video processing.")
 
 
 
     # Initialize info dictionary to categorize variables by type
-    name_info = {}
-    data_info = {}
+    type_vars_dict = {}
+
+
+    # Assumes same coords and data_vars across trials. So we just use first.
+    ds = dt.isel(trials=0)
 
 
 
 
-    name_info['trials'] = ds.coords['trials'].values.astype(int)
-
-    if 'keypoints' in ds.coords:
-        name_info['keypoints'] = ds.coords['keypoints'].values.astype(str)
-
-    if 'individuals' in ds.coords:
-        name_info['individuals'] = ds.coords['individuals'].values.astype(str)
-
-    # Ensure 'trials', 'keypoints', 'individuals' are all 1D
-    for name in ['trials', 'keypoints', 'individuals']:
-        if name in ds.coords:
-            arr = ds.coords[name].values
-            if arr.ndim != 1:
-                show_error(f"Coordinate '{name}' must be 1D, but got shape {arr.shape}")
+    type_vars_dict['individuals'] = ds.coords['individuals'].values.astype(str)
 
 
-    # Process coordinates
-    for coord in ds.coords.values():
-        ctype = coord.attrs.get('type') if isinstance(getattr(coord, 'attrs', None), dict) else None
-        if ctype is not None:
-            if ctype not in name_info:
-                name_info[ctype] = []
-                data_info[ctype] = []
-            name_info[ctype].append(coord.name)
-            data_info[ctype].append(coord)
-
-    # Process data variables
-    for var in ds.data_vars.values():
-        vtype = var.attrs.get('type') if isinstance(getattr(var, 'attrs', None), dict) else None
-        if vtype is not None:
-            if vtype not in name_info:
-                name_info[vtype] = []
-                data_info[vtype] = []
-            name_info[vtype].append(var.name)
-
-
-    if "mics" in name_info and not hasattr(ds, "sr"):
-        show_error("Dataset must have 'sr' (for sampling rate) attribute for microphone processing.")
-
-
-    # Validate types against allowed keys
-    allowed_keys = ['trials', 'keypoints', 'individuals', 'features', 'colors', 'trial_conditions', 'cameras', 'mics']
-    invalid_types = [t for t in name_info.keys() if t not in allowed_keys]
-    # Remove invalid types from name_info instead of erroring
-    for invalid_type in invalid_types:
-        del name_info[invalid_type]
-    # Auto-assign types for common variables if not specified
-    if 'features' not in name_info:
-        # Auto-detect feature variables based on common names
-        feature_candidates = ['position', 'velocity', 'confidence', 'speed', 'acceleration']
-        auto_features = [var for var in ds.data_vars if any(candidate in var.lower() for candidate in feature_candidates)]
-        if auto_features:
-            name_info['features'] = auto_features
-            
-    if 'cameras' not in name_info:
-        # Auto-detect camera variables based on common names
-        camera_candidates = [var for var in ds.data_vars if var.startswith(('cam', 'video')) and var not in ['labels']]
-        if camera_candidates:
-            name_info['cameras'] = camera_candidates
+    feat_ds = ds.filter_by_attrs(type='features')
+    type_vars_dict['features'] = list(feat_ds.data_vars)
     
-    # Check for required keys after auto-assignment
-    required_keys = ['trials', 'features']  # Remove 'cameras' from required since not all datasets have them
-    missing_required = [k for k in required_keys if k not in name_info]
-    if missing_required:
-        show_error(f"Dataset missing required types: {missing_required}. Please specify these types for your variables/coordinates.")
-    # invalid_types are now handled by removal above, no need to error
+    type_vars_dict['cameras'] = list(dt.attrs.get('cameras', []))
+    
+    
+    # Optional
+    mics = list(dt.attrs.get('mics', []))
+    if mics:
+        type_vars_dict['mics'] = mics
 
-    # Perform comprehensive data type validation
-    if not validate_dataset_types(ds, data_info):
+    tracking = list(dt.attrs.get('tracking', []))
+    if tracking:
+        type_vars_dict['tracking'] = tracking
+    
+    if 'keypoints' in ds.coords:
+        type_vars_dict['keypoints'] = ds.coords['keypoints'].values.astype(str)
+    
+    color_ds = ds.filter_by_attrs(type='colors')
+    if not color_ds.data_vars:
+        type_vars_dict['colors'] = list(color_ds.data_vars)
+    
+    cp_ds = ds.filter_by_attrs(type='changepoints')
+    if not cp_ds.data_vars:
+        type_vars_dict['changepoints'] = list(cp_ds.data_vars)
+
+
+    type_vars_dict["trial_conditions"] = possible_trial_conditions(dt)
+
+
+    if not validate_dataset(ds, type_vars_dict):
         show_error("Dataset validation failed - see error messages above")
 
 
-    return ds, name_info
+    return dt, type_vars_dict
 
 
 
-def validate_dataset_types(ds: xr.Dataset, info: dict) -> bool:
+def possible_trial_conditions(dt: xr.DataTree) -> List[str]:
+    """
+    Identify possible trial conditions.
+    """
+    ds = dt.isel(trials=0)
+    
+    
+    common_extensions = {
+        '.csv', '.mp4', '.avi', '.mov', '.h5', '.hdf5', 
+        '.wav', '.mp3', '.npy',
+    }
+    
+    common_attrs = dt.get_common_attrs().keys()
+    
+    cond_attrs = []
+    for key, value in ds.attrs.items():
+        if key in ['trial'] or key in common_attrs:
+            continue
+        
+        if isinstance(value, str):
+            if Path(value).suffix.lower() in common_extensions:
+                continue
+            
+        cond_attrs.append(key)
+      
+    return cond_attrs
+
+
+def validate_dataset(ds: xr.Dataset, type_vars_dict: dict) -> bool:
     """Validate data types in the dataset according to specifications.
     
     Args:
@@ -151,81 +151,76 @@ def validate_dataset_types(ds: xr.Dataset, info: dict) -> bool:
     validation_errors = []
     
     
-    labels = ds['labels'].values
-    if not isinstance(labels, np.ndarray):
-        labels = np.array(labels)
-    if np.issubdtype(labels.dtype, np.integer):
-        pass  # valid
-    elif np.issubdtype(labels.dtype, np.floating):
-        if not np.all(np.equal(np.mod(labels, 1), 0)):
-            validation_errors.append("Data variable 'labels' must be integers or floats representing whole numbers")
-    else:
-        validation_errors.append("Data variable 'labels' must be an array of integers or whole-number floats")
+    if "features" not in type_vars_dict:
+        validation_errors.append(f"Dataset must contain at least one variable with type 'features'")
 
-    
-    
+    if "cameras" not in type_vars_dict:
+        validation_errors.append(f"Dataset must contain at least one attribute with file_type 'cameras'")
 
-    # Check colors - must be numpy array of shape (N, 3)
-    if 'colors' in info:
-        for var in info['colors']:
-            colors = var.values
-            if not isinstance(colors, np.ndarray):
-                validation_errors.append(f"Variable '{var.name}' with type 'colors' must be a numpy array")
-                continue
-            if colors.ndim < 2:
-                validation_errors.append(f"Variable '{var.name}' with type 'colors' must have at least 2 dimensions, got {colors.ndim}")
-                continue
-            if 3 not in colors.shape:
-                validation_errors.append(f"Variable '{var.name}' with type 'colors' must have one dimension of size 3, got shape {colors.shape}")
-            if not np.issubdtype(colors.dtype, np.number):
-                validation_errors.append(f"Variable '{var.name}' with type 'colors' must contain numeric values")
-    
-    # Check features - must be arrays
-    if 'features' in info:
-        for var in info['features']:
-            if not isinstance(var.values, np.ndarray):
-                validation_errors.append(f"Variable '{var.name}' with type 'features' must be an array")
-    
-    # Check trial_conditions - must be vector of ints
-    if 'trial_conditions' in info:
-        for var in info['trial_conditions']:
-            conditions = var.values
-            if not isinstance(conditions, np.ndarray):
-                conditions = np.array(conditions)
-            if len(conditions.shape) != 1:
-                validation_errors.append(f"Variable '{var.name}' with type 'trial_conditions' must be a 1D vector, got shape {conditions.shape}")
-            if not np.issubdtype(conditions.dtype, np.integer):
-                validation_errors.append(f"Variable '{var.name}' with type 'trial_conditions' must contain integers")
-    
-    # Check cameras - must be array/list of strings
-    if 'cameras' in info:
-        for var in info['cameras']:
-            cameras = var.values
-            if not isinstance(cameras, np.ndarray):
-                cameras = np.array(cameras)
-            if not (cameras.dtype.kind in ['U', 'S', 'O']):  # Unicode, byte string, or object (string)
-                validation_errors.append(f"Variable '{var.name}' with type 'cameras' must be an array of strings")
-    
-    # Check mics - must be array/list of strings
-    if 'mics' in info:
-        for var in info['mics']:
-            mics = var.values
-            if not isinstance(mics, np.ndarray):
-                mics = np.array(mics)
-            if not (mics.dtype.kind in ['U', 'S', 'O']):  # Unicode, byte string, or object (string)
-                validation_errors.append(f"Variable '{var.name}' with type 'mics' must be an array of strings")
-    
-    # Check special data variables
-    # Check changepoints - must be boolean array or only contain 0 or 1 if present
-    if 'changepoints' in ds.data_vars:
-        changepoints = ds['changepoints'].values
-        if not isinstance(changepoints, np.ndarray):
-            changepoints = np.array(changepoints)
-        if not (np.issubdtype(changepoints.dtype, np.bool_) or
-                (np.issubdtype(changepoints.dtype, np.integer) and np.isin(changepoints, [0, 1]).all())):
-            validation_errors.append("Data variable 'changepoints' must be a boolean array or contain only 0 and 1")
-    
+    if "labels" not in ds.data_vars:
+        validation_errors.append("Dataset must contain 'labels' variable")
+          
+    if "mics" in type_vars_dict and not hasattr(ds, "sr"):
+        validation_errors.append("Dataset must have 'sr' (for sampling rate) attribute for microphone processing.")
 
+
+
+    labels = ds['labels'].values 
+    
+    def is_integer_labels(arr: np.ndarray) -> bool:
+        """Check if the array contains only integer values (no fractional part)."""
+        if np.issubdtype(arr.dtype, np.floating):
+            return np.all(np.mod(arr, 1) == 0)
+        return np.issubdtype(arr.dtype, np.integer)
+
+    if not is_integer_labels(labels):
+        validation_errors.append("Variable 'labels' must contain integer values (no fractional part)")
+    
+    
+    
+    feat_ds = ds.filter_by_attrs(type='features')
+    for var_name, var in feat_ds.data_vars.items():
+        if not isinstance(var.values, np.ndarray):
+            validation_errors.append(f"Variable '{var.name}' with type 'features' must be an array")
+    
+    
+    if "changepoints" in type_vars_dict:
+        cp_ds = ds.filter_by_attrs(type='changepoints')
+
+        for var_name, var in cp_ds.data_vars.items():
+            arr = var.values
+
+            if not is_integer_labels(arr):
+                validation_errors.append(
+                    f"Data variable '{var.name}' with type 'changepoints' must contain only integer values"
+                )
+
+            if arr.min() < 0 or arr.max() > 1:
+                validation_errors.append(
+                    f"Data variable '{var.name}' with type 'changepoints' must have values in range [0, 1]"
+                )
+ 
+    
+    if 'colors' in type_vars_dict:
+        cp_ds = ds.filter_by_attrs(type='colors')
+
+        for var_name, data_array in cp_ds.data_vars.items():
+            flat = data_array.transpose(..., 'RGB').values.reshape(-1, 3)
+            
+            is_valid_rgb = (
+                flat.shape[1] == 3 and
+                ((0 <= flat.min() <= flat.max() <= 1) or 
+                (0 <= flat.min() <= flat.max() <= 255))
+            )
+            if is_valid_rgb:
+                print(f"{var_name}: {flat.shape} | Valid RGB: {is_valid_rgb} | Range: [{flat.min():.1f}, {flat.max():.1f}]")
+            else:
+                validation_errors.append(
+                    f"Data variable '{var_name}' with type 'colors' must be an array of RGB values with shape (..., 3) "
+                    "and values in range [0, 1] or [0, 255]"
+                )
+
+  
 
     # Report validation errors
     if validation_errors:

@@ -180,14 +180,19 @@ class DataWidget(DataLoader, QWidget):
 
         # Load ds
         nc_file_path = self.io_widget.get_nc_file_path()
-        self.app_state.ds, self.type_vars_dict = load_dataset(nc_file_path)
-        self.app_state.trials = list(self.app_state.ds.trials.values)
-        self.navigation_widget.trials_combo.addItems([str(int(trial)) for trial in self.app_state.trials])
+        
+        self.app_state.dt, self.type_vars_dict = load_dataset(nc_file_path)
+        trials = self.app_state.dt.trials
+        self.app_state.ds = self.app_state.dt.sel(trials=trials[0])
+
+        self.navigation_widget.trials_combo.addItems([str(int(trial)) for trial in trials])
+        self.app_state.trials = trials
+        
+        
+        
 
         self._create_trial_controls()
-
         self._restore_or_set_defaults()
-
         self._set_controls_enabled(True)
 
         
@@ -325,7 +330,7 @@ class DataWidget(DataLoader, QWidget):
                 self.update_tracking()
             elif key in ["features", "colors", "individuals", "keypoints"]:
                 xmin, xmax = self.lineplot.get_current_xlim()
-                self.update_plot(t0=xmin, t1=xmax)
+                self.update_line_plot(t0=xmin, t1=xmax)
                 if key in ["individuals", "keypoints"]:
                     self.update_space_plot()
             elif key == "trial_conditions":
@@ -385,7 +390,7 @@ class DataWidget(DataLoader, QWidget):
             
 
 
-
+    # Currently not working, I think
     def all_data_vars_nan(self, individual) -> bool:
         """
         Check if all data variables in the selected subset are entirely NaN.
@@ -433,14 +438,13 @@ class DataWidget(DataLoader, QWidget):
         filter_condition = self.app_state.trial_conditions_sel
         filter_value = self.trial_conditions_value_combo.currentText()
 
-        original_trials = self.app_state.ds.trials.values
+        original_trials = self.app_state.dt.trials
 
         if filter_condition != "None" and filter_value != "None":
-            # Filter trials based on condition
-            ds = self.app_state.ds.copy(deep=True)
-            filtered_trials = ds.trials.where(ds[filter_condition] == int(filter_value), drop=True).values
-
-            self.app_state.trials = [trial for trial in original_trials if trial in filtered_trials]
+            filt_dt = self.app_state.dt.filter_by_attr(filter_condition, filter_value)
+            
+            
+            self.app_state.trials = [trial for trial in original_trials if trial in filt_dt.trials]
         else:
             # Reset to all trials
             self.app_state.trials = original_trials
@@ -456,9 +460,9 @@ class DataWidget(DataLoader, QWidget):
                 self.navigation_widget.trials_combo.setCurrentText(str(self.app_state.trials_sel))
 
         self.navigation_widget.trials_combo.blockSignals(False)
-        self.update_plot()
+        self.update_line_plot()
 
-    def update_plot(self, **kwargs):
+    def update_line_plot(self, **kwargs):
         """Update the line plot with current trial/keypoint/variable selection."""
         if not self.app_state.ready:
             return
@@ -503,7 +507,7 @@ class DataWidget(DataLoader, QWidget):
         self._remove_video_slider_from_viewer()
 
    
-        video_file = self.app_state.ds[self.app_state.cameras_sel].sel(trials=self.app_state.trials_sel).values.item()
+        video_file = self.app_state.ds.attrs[self.app_state.cameras_sel]
 
         video_path = os.path.join(self.app_state.video_folder, video_file)
         self.app_state.video_path = os.path.normpath(video_path)
@@ -513,7 +517,7 @@ class DataWidget(DataLoader, QWidget):
         if self.app_state.audio_folder and hasattr(self.app_state, 'mics_sel'):
             try:
                 audio_file = (
-                    self.app_state.ds[self.app_state.mics_sel].sel(trials=self.app_state.trials_sel).values.item()
+                    self.app_state.ds.attrs[self.app_state.mics_sel]
                 )
                 audio_path = os.path.join(self.app_state.audio_folder, audio_file)
                 self.app_state.audio_path = os.path.normpath(audio_path)
@@ -591,8 +595,7 @@ class DataWidget(DataLoader, QWidget):
         
     def set_sync_mode(self, is_playing: bool) -> None:
         """Public method to set sync mode based on playback state."""
-        
-        # self.sync_manager.close()
+
 
         if self.app_state.sync_state == "pyav_stream_mode":
             self.lineplot.set_stream_mode()
@@ -603,18 +606,19 @@ class DataWidget(DataLoader, QWidget):
     def _on_sync_frame_changed(self, frame_number: int):
         """Handle frame changes from sync manager."""
         self.app_state.current_frame = frame_number
-        current_time = frame_number / self.app_state.ds.fps
-        self.lineplot.time_marker.setValue(current_time)
-        xlim = self.lineplot.get_current_xlim()
+        self.lineplot.update_time_marker_and_window(frame_number)
         
         # Update window continously
         if self.app_state.sync_state == "pyav_stream_mode":
-            self.lineplot._update_window_position()
+            xlim = self.lineplot.get_current_xlim()
+            self.lineplot.set_x_range(mode='center', center_on_frame=frame_number, preserve_xlim=xlim)
             
         # Only update if out of bounds
         elif self.app_state.sync_state == "napari_video_mode":
+            current_time = frame_number / self.app_state.ds.fps
+            xlim = self.lineplot.get_current_xlim()
             if current_time < xlim[0] or current_time > xlim[1]:
-                self.lineplot._update_window_position()
+                self.lineplot.set_x_range(mode='center', center_on_frame=frame_number)
 
 
 
@@ -635,7 +639,7 @@ class DataWidget(DataLoader, QWidget):
         self.source_software = self.app_state.ds.source_software
 
         tracking_file = (
-            self.app_state.ds[self.app_state.tracking_sel].sel(trials=self.app_state.trials_sel).values.item()
+            self.app_state.ds.attrs[self.app_state.tracking_sel]
         )
 
         self.file_path = os.path.join(self.app_state.tracking_folder, tracking_file)
@@ -666,7 +670,7 @@ class DataWidget(DataLoader, QWidget):
         """Handle spectrogram checkbox state change."""
         self.app_state.plot_spectrogram = bool(self.plot_spec_checkbox.isChecked())
 
-        self.update_plot()
+        self.update_line_plot()
 
     def _on_space_plot_changed(self):
         """Handle space plot combo change."""
@@ -695,7 +699,6 @@ class DataWidget(DataLoader, QWidget):
                     self.labels_widget.highlight_spaceplot.connect(self._highlight_positions_in_space_plot)
                 
             # Get current selections
-            trial = self.navigation_widget.trials_combo.currentText()
             individual = self.combos.get('individuals', None)
             individual_text = individual.currentText() if individual else None
             keypoints = self.combos.get('keypoints', None)
@@ -704,7 +707,7 @@ class DataWidget(DataLoader, QWidget):
             color_variable = color_variable.currentText() if color_variable else None
             
             # Update plot
-            self.space_plot.update_plot(plot_type, trial, individual_text, keypoints_text, color_variable)
+            self.space_plot.update_plot(plot_type, individual_text, keypoints_text, color_variable)
             self.space_plot.show()
             
             
