@@ -6,7 +6,7 @@ from qtpy.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget
 from qtpy.QtCore import Signal, QTimer
 from typing import Optional, Tuple
 from movformer.utils.xr_utils import sel_valid
-from src.movformer_gui.plot_utils import (
+from movformer.gui.plot_utils import (
     plot_ds_variable, 
     clear_plot_items, 
 )

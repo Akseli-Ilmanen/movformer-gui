@@ -1,5 +1,6 @@
 src/ignore/*
 movformer/*
+downloads/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

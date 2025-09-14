@@ -34,9 +34,9 @@ def load_dataset(file_path: str) -> Tuple[Optional[xr.Dataset], Optional[dict]]:
         show_error(error_msg)
         return None, None
 
-    dt = TrialTree.from_file(file_path)
+    dt = TrialTree.load(file_path)
     
-    
+    print("f")
 
     # REWRITE 
     # # Check minimum required coordinates and variables

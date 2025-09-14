@@ -618,8 +618,7 @@ class LabelsWidget(QWidget):
         nc_path = Path(self.app_state.nc_file_path)
         
         try:
-            self.app_state.dt.close()
-            self.app_state.dt.to_netcdf(nc_path)
+            self.app_state.dt.save(nc_path)
         except Exception as e:
             raise IOError(f"Failed to save labels to .nc file: {e}")
     
@@ -637,7 +636,7 @@ class LabelsWidget(QWidget):
         
 
     
-        self.app_state.dt = TrialTree.from_file(nc_path)
+        self.app_state.dt = TrialTree.load(nc_path)
       
 
         self.app_state.changes_saved = True
